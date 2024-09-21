@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"unsafe"
 
-	"github.com/mailru/easyjson/jlexer"
-	"github.com/mailru/easyjson/jwriter"
+	"github.com/19910211/easyjson/jlexer"
+	"github.com/19910211/easyjson/jwriter"
 )
 
 // Marshaler is an easyjson-compatible marshaler interface.

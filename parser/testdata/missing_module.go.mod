@@ -2,5 +2,5 @@
 go 1.13
 
 require (
-	github.com/mailru/easyjson v0.7.0
+	github.com/19910211/easyjson v0.7.0
 )

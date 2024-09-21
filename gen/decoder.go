@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/mailru/easyjson"
+	"github.com/19910211/easyjson"
 )
 
 // Target this byte size for initial slice allocation to reduce garbage collection.
