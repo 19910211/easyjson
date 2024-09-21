@@ -112,6 +112,18 @@ func (b *Buffer) AppendByte(data byte) {
 }
 
 // AppendBytes appends a byte slice to buffer.
+func (b *Buffer) Write(data []byte) (n int, err error) {
+	b.AppendBytes(data)
+	return len(data), nil
+}
+
+// AppendBytes appends a byte slice to buffer.
+func (b *Buffer) WriteString(data string) (n int, err error) {
+	b.AppendString(data)
+	return len(data), nil
+}
+
+// AppendBytes appends a byte slice to buffer.
 func (b *Buffer) AppendBytes(data []byte) {
 	if len(data) <= cap(b.Buf)-len(b.Buf) {
 		b.Buf = append(b.Buf, data...) // fast path
@@ -168,12 +180,16 @@ func (b *Buffer) Size() int {
 
 // DumpTo outputs the contents of a buffer to a writer and resets the buffer.
 func (b *Buffer) DumpTo(w io.Writer) (written int, err error) {
+	n, err := b.WriteTo(w)
+	return int(n), err
+}
+
+func (b *Buffer) WriteTo(w io.Writer) (n int64, err error) {
 	bufs := net.Buffers(b.bufs)
 	if len(b.Buf) > 0 {
 		bufs = append(bufs, b.Buf)
 	}
-	n, err := bufs.WriteTo(w)
-
+	n, err = bufs.WriteTo(w)
 	for _, buf := range b.bufs {
 		putBuf(buf)
 	}
@@ -183,7 +199,38 @@ func (b *Buffer) DumpTo(w io.Writer) (written int, err error) {
 	b.Buf = nil
 	b.toPool = nil
 
-	return int(n), err
+	return n, err
+}
+
+// ReadFrom
+func (b *Buffer) ReadFrom(r io.Reader) (int64, error) {
+
+	var (
+		c    = 4096
+		buf  [4096]byte
+		i, n int
+	)
+
+	for {
+		m, e := r.Read(buf[i:c])
+		i += m
+		if i == c {
+			b.AppendBytes(buf[:i])
+			n += i
+			i = 0
+		}
+
+		if e != nil {
+			if e == io.EOF {
+				if i > 0 {
+					b.AppendBytes(buf[:i])
+					n += i
+				}
+				return int64(n), nil
+			}
+			return int64(n), e
+		}
+	}
 }
 
 // BuildBytes creates a single byte slice with all the contents of the buffer. Data is
@@ -264,6 +311,17 @@ func (r *readCloser) Close() error {
 	r.bufs = nil
 
 	return nil
+}
+
+func (r *readCloser) WriteTo(w io.Writer) (n int64, err error) {
+	bufs := net.Buffers(r.bufs)
+	n, err = bufs.WriteTo(w)
+	for _, buf := range r.bufs {
+		putBuf(buf)
+	}
+
+	r.bufs = nil
+	return n, err
 }
 
 // ReadCloser creates an io.ReadCloser with all the contents of the buffer.
