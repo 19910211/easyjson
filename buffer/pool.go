@@ -222,11 +222,12 @@ func (b *Buffer) ReadFrom(r io.Reader) (int64, error) {
 		}
 
 		if e != nil {
+			if i > 0 {
+				b.AppendBytes(buf[:i])
+				n += i
+			}
+
 			if e == io.EOF {
-				if i > 0 {
-					b.AppendBytes(buf[:i])
-					n += i
-				}
 				return int64(n), nil
 			}
 			return int64(n), e
