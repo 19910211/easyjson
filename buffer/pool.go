@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"unsafe"
 )
 
 // PoolConfig contains configuration for the allocation and reuse strategy.
@@ -268,6 +269,21 @@ func (b *Buffer) BuildBytes(reuse ...[]byte) []byte {
 	return ret
 }
 
+func (b *Buffer) Bytes() []byte {
+	var ret = make([]byte, 0, b.Size())
+	for _, buf := range b.bufs {
+		ret = append(ret, buf...)
+	}
+
+	ret = append(ret, b.Buf...)
+	return ret
+}
+
+func (b *Buffer) String() string {
+	var ret = b.Bytes()
+	return unsafe.String(unsafe.SliceData(ret), len(ret))
+}
+
 type readCloser struct {
 	offset int
 	bufs   [][]byte
@@ -322,6 +338,24 @@ func (r *readCloser) WriteTo(w io.Writer) (n int64, err error) {
 
 	r.bufs = nil
 	return n, err
+}
+
+func (r *readCloser) String() string {
+	var n int
+	for _, buf := range r.bufs {
+		n += len(buf)
+	}
+
+	if n == 0 {
+		return ""
+	}
+
+	var s = make([]byte, 0, n)
+	for _, buf := range r.bufs {
+		s = append(s, buf...)
+	}
+
+	return unsafe.String(unsafe.SliceData(s), len(s))
 }
 
 // ReadCloser creates an io.ReadCloser with all the contents of the buffer.
