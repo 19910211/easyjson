@@ -457,7 +457,7 @@ type recyclableReadCloser struct {
 }
 
 func newRecyclableReadCloser(data [][]byte) *recyclableReadCloser {
-	d := recyclablePool.Get().(*recyclableReadCloser)
+	d := recyclableReadCloserPool.Get().(*recyclableReadCloser)
 	*d = recyclableReadCloser{bufs: newRecyclable(data)}
 	return d
 }
@@ -482,7 +482,7 @@ func (r *recyclableReadCloser) Clone() io.ReadCloser {
 		return nil
 	}
 
-	d := recyclablePool.Get().(*recyclableReadCloser)
+	d := recyclableReadCloserPool.Get().(*recyclableReadCloser)
 	*d = recyclableReadCloser{bufs: r.bufs}
 	return d
 }
