@@ -3,9 +3,11 @@
 package buffer
 
 import (
+	"errors"
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -181,16 +183,15 @@ func (b *Buffer) Size() int {
 
 // DumpTo outputs the contents of a buffer to a writer and resets the buffer.
 func (b *Buffer) DumpTo(w io.Writer) (written int, err error) {
-	n, err := b.WriteTo(w)
-	return int(n), err
-}
-
-func (b *Buffer) WriteTo(w io.Writer) (n int64, err error) {
-	bufs := net.Buffers(b.bufs)
+	//bufs := net.Buffers(b.bufs)
+	bufs := append(make([][]byte, 0, len(b.bufs)+1), b.bufs...)
 	if len(b.Buf) > 0 {
 		bufs = append(bufs, b.Buf)
 	}
-	n, err = bufs.WriteTo(w)
+
+	n2 := net.Buffers(bufs)
+	n, err := n2.WriteTo(w)
+
 	for _, buf := range b.bufs {
 		putBuf(buf)
 	}
@@ -200,7 +201,32 @@ func (b *Buffer) WriteTo(w io.Writer) (n int64, err error) {
 	b.Buf = nil
 	b.toPool = nil
 
-	return n, err
+	return int(n), err
+}
+
+// WriteTo outputs the contents of a buffer to a writer and resets the buffer.
+func (b *Buffer) WriteTo(w io.Writer) (n int64, err error) {
+	var wLen int
+	for _, buf := range b.bufs {
+		wLen, err = w.Write(buf)
+		n += int64(wLen)
+		if err != nil {
+			return
+		}
+	}
+
+	wLen, err = w.Write(b.Buf)
+	n += int64(wLen)
+
+	for _, buf := range b.bufs {
+		putBuf(buf)
+	}
+	putBuf(b.toPool)
+
+	b.bufs = nil
+	b.Buf = nil
+	b.toPool = nil
+	return
 }
 
 // ReadFrom
@@ -368,4 +394,132 @@ func (b *Buffer) ReadCloser() io.ReadCloser {
 	b.Buf = nil
 
 	return ret
+}
+
+// ReadCloser creates an io.ReadCloser with all the contents of the buffer.
+func (b *Buffer) RecyclableReader() io.ReadCloser {
+
+	ret := &recyclableReadCloser{bufs: &recyclable{data: append(b.bufs, b.Buf)}}
+
+	b.bufs = nil
+	b.toPool = nil
+	b.Buf = nil
+
+	return ret
+}
+
+var closedErr = errors.New("reader is closed")
+
+type Cloner interface {
+	Clone() io.ReadCloser
+}
+type recyclable struct {
+	data      [][]byte
+	isRecycle atomic.Bool
+}
+
+func (r *recyclable) Recycle() {
+	if r == nil {
+		return
+	}
+
+	if r.isRecycle.Swap(true) {
+		return
+	}
+
+	// Release all buffers.
+	data := r.data
+	r.data = nil
+	for _, buf := range data {
+		putBuf(buf)
+	}
+}
+
+type recyclableReadCloser struct {
+	offset  int
+	index   int
+	bufs    *recyclable
+	isClose atomic.Bool
+}
+
+func (r *recyclableReadCloser) Clone() io.ReadCloser {
+	return &recyclableReadCloser{bufs: r.bufs}
+}
+
+func (r *recyclableReadCloser) Close() error {
+	r.isClose.Swap(true)
+	return nil
+}
+
+func (r *recyclableReadCloser) Recycle() {
+	if r == nil {
+		return
+	}
+	r.bufs.Recycle()
+}
+
+func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
+	var (
+		bufs  = r.bufs.data
+		count = len(r.bufs.data)
+	)
+	for ; r.index < count; r.index++ {
+		if r.isClose.Load() {
+			err = closedErr
+			break
+		}
+		// Copy as much as we can.
+		buf := bufs[r.index]
+		x := copy(p[n:], buf[r.offset:])
+		n += x // Increment how much we filled.
+
+		// Did we empty the whole buffer?
+		if r.offset+x == len(buf) {
+			// On to the next buffer.
+			r.offset = 0
+			// We can release this buffer.
+		} else {
+			r.offset += x
+		}
+
+		if n == len(p) {
+			break
+		}
+	}
+
+	// No buffers left or nothing read?
+	if r.index == count {
+		err = io.EOF
+	}
+	return
+}
+
+func (r *recyclableReadCloser) WriteTo(w io.Writer) (n int64, err error) {
+	var wLen int
+	for _, buf := range r.bufs.data {
+		wLen, err = w.Write(buf)
+		n += int64(wLen)
+		if err != nil {
+			return
+		}
+	}
+	return
+}
+
+func (r *recyclableReadCloser) String() string {
+	var n int
+	for _, buf := range r.bufs.data {
+		n += len(buf)
+	}
+
+	if n == 0 {
+		return ""
+	}
+
+	var s = make([]byte, 0, n)
+	for _, buf := range r.bufs.data {
+		s = append(s, buf...)
+	}
+
+	return unsafe.String(unsafe.SliceData(s), len(s))
 }

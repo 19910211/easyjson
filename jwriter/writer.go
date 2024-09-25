@@ -34,7 +34,18 @@ func (w *Writer) Size() int {
 
 // DumpTo outputs the data to given io.Writer, resetting the buffer.
 func (w *Writer) DumpTo(out io.Writer) (written int, err error) {
+	if w.Error != nil {
+		return 0, w.Error
+	}
 	return w.Buffer.DumpTo(out)
+}
+
+// WriteTo outputs the data to given io.Writer, resetting the buffer.
+func (w *Writer) WriteTo(out io.Writer) (n int64, err error) {
+	if w.Error != nil {
+		return 0, w.Error
+	}
+	return w.Buffer.WriteTo(out)
 }
 
 // BuildBytes returns writer data as a single byte slice. You can optionally provide one byte slice
