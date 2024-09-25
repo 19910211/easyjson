@@ -399,8 +399,7 @@ func (b *Buffer) ReadCloser() io.ReadCloser {
 // ReadCloser creates an io.ReadCloser with all the contents of the buffer.
 func (b *Buffer) RecyclableReader() io.ReadCloser {
 
-	ret := &recyclableReadCloser{bufs: &recyclable{data: append(b.bufs, b.Buf)}}
-
+	ret := newRecyclableReadCloser(append(b.bufs, b.Buf))
 	b.bufs = nil
 	b.toPool = nil
 	b.Buf = nil
@@ -410,12 +409,24 @@ func (b *Buffer) RecyclableReader() io.ReadCloser {
 
 var closedErr = errors.New("reader is closed")
 
+var (
+	recyclableReadCloserPool = sync.Pool{New: func() any { return &recyclableReadCloser{} }}
+	recyclablePool           = sync.Pool{New: func() any { return &recyclable{} }}
+)
+
 type Cloner interface {
 	Clone() io.ReadCloser
 }
 type recyclable struct {
 	data      [][]byte
 	isRecycle atomic.Bool
+}
+
+func newRecyclable(data [][]byte) *recyclable {
+	d := recyclablePool.Get().(*recyclable)
+	d.data = data
+	d.isRecycle = atomic.Bool{}
+	return d
 }
 
 func (r *recyclable) Recycle() {
@@ -433,29 +444,49 @@ func (r *recyclable) Recycle() {
 	for _, buf := range data {
 		putBuf(buf)
 	}
+
+	recyclablePool.Put(r)
 }
 
 type recyclableReadCloser struct {
-	offset  int
-	index   int
-	bufs    *recyclable
-	isClose atomic.Bool
+	offset    int
+	index     int
+	bufs      *recyclable
+	isClose   atomic.Bool
+	isRecycle atomic.Bool
 }
 
-func (r *recyclableReadCloser) Clone() io.ReadCloser {
-	return &recyclableReadCloser{bufs: r.bufs}
-}
-
-func (r *recyclableReadCloser) Close() error {
-	r.isClose.Swap(true)
-	return nil
+func newRecyclableReadCloser(data [][]byte) *recyclableReadCloser {
+	d := recyclablePool.Get().(*recyclableReadCloser)
+	*d = recyclableReadCloser{bufs: newRecyclable(data)}
+	return d
 }
 
 func (r *recyclableReadCloser) Recycle() {
 	if r == nil {
 		return
 	}
+
+	if r.isRecycle.Swap(true) {
+		return
+	}
+
 	r.bufs.Recycle()
+	r.bufs = nil
+
+	recyclableReadCloserPool.Put(r)
+}
+
+func (r *recyclableReadCloser) Clone() io.ReadCloser {
+	if r == nil {
+		return nil
+	}
+	return &recyclableReadCloser{bufs: r.bufs}
+}
+
+func (r *recyclableReadCloser) Close() error {
+	r.isClose.Swap(true)
+	return nil
 }
 
 func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
