@@ -481,7 +481,10 @@ func (r *recyclableReadCloser) Clone() io.ReadCloser {
 	if r == nil {
 		return nil
 	}
-	return &recyclableReadCloser{bufs: r.bufs}
+
+	d := recyclablePool.Get().(*recyclableReadCloser)
+	*d = recyclableReadCloser{bufs: r.bufs}
+	return d
 }
 
 func (r *recyclableReadCloser) Close() error {
