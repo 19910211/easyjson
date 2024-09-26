@@ -419,13 +419,14 @@ type Cloner interface {
 }
 type recyclable struct {
 	data      [][]byte
-	isRecycle atomic.Bool
+	isRecycle atomic.Int64
 }
 
 func newRecyclable(data [][]byte) *recyclable {
 	d := recyclablePool.Get().(*recyclable)
 	d.data = data
-	d.isRecycle = atomic.Bool{}
+	d.isRecycle = atomic.Int64{}
+	d.isRecycle.Add(1)
 	return d
 }
 
@@ -434,18 +435,16 @@ func (r *recyclable) Recycle() {
 		return
 	}
 
-	if r.isRecycle.Swap(true) {
-		return
-	}
+	if r.isRecycle.Add(-1) == 0 {
+		// Release all buffers.
+		data := r.data
+		r.data = nil
+		for _, buf := range data {
+			putBuf(buf)
+		}
 
-	// Release all buffers.
-	data := r.data
-	r.data = nil
-	for _, buf := range data {
-		putBuf(buf)
+		recyclablePool.Put(r)
 	}
-
-	recyclablePool.Put(r)
 }
 
 type recyclableReadCloser struct {
@@ -483,6 +482,11 @@ func (r *recyclableReadCloser) Clone() io.ReadCloser {
 	}
 
 	d := recyclableReadCloserPool.Get().(*recyclableReadCloser)
+
+	if r.bufs != nil {
+		r.bufs.isRecycle.Add(1)
+	}
+
 	*d = recyclableReadCloser{bufs: r.bufs}
 	return d
 }
@@ -493,6 +497,15 @@ func (r *recyclableReadCloser) Close() error {
 }
 
 func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
+
+	if r.isClose.Load() {
+		return 0, closedErr
+	}
+
+	if r.bufs == nil {
+		return 0, err
+	}
+
 	var (
 		bufs  = r.bufs.data
 		count = len(r.bufs.data)
@@ -529,6 +542,10 @@ func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
 }
 
 func (r *recyclableReadCloser) WriteTo(w io.Writer) (n int64, err error) {
+	if r.isClose.Load() {
+		return 0, closedErr
+	}
+
 	var wLen int
 	for _, buf := range r.bufs.data {
 		wLen, err = w.Write(buf)
