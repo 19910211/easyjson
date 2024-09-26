@@ -496,14 +496,18 @@ func (r *recyclableReadCloser) Close() error {
 	return nil
 }
 
-func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
+func (r *recyclableReadCloser) reset() {
+	r.offset = 0
+	r.index = 0
+}
 
+func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
 	if r.isClose.Load() {
 		return 0, closedErr
 	}
 
 	if r.bufs == nil {
-		return 0, err
+		return 0, io.EOF
 	}
 
 	var (
@@ -536,6 +540,10 @@ func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
 
 	// No buffers left or nothing read?
 	if r.index == count {
+		r.reset()
+		if len(p) == 0 {
+			return 0, nil
+		}
 		err = io.EOF
 	}
 	return
@@ -546,6 +554,10 @@ func (r *recyclableReadCloser) WriteTo(w io.Writer) (n int64, err error) {
 		return 0, closedErr
 	}
 
+	if r.bufs == nil {
+		return 0, nil
+	}
+
 	var wLen int
 	for _, buf := range r.bufs.data {
 		wLen, err = w.Write(buf)
@@ -554,6 +566,8 @@ func (r *recyclableReadCloser) WriteTo(w io.Writer) (n int64, err error) {
 			return
 		}
 	}
+
+	r.reset()
 	return
 }
 
