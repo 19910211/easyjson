@@ -396,8 +396,17 @@ func (b *Buffer) ReadCloser() io.ReadCloser {
 	return ret
 }
 
+type RecyclableReader interface {
+	io.ReadCloser
+	WriteTo(w io.Writer) (n int64, err error)
+	Clone() RecyclableReader
+	Recycle()
+	Len() int
+	String() string
+}
+
 // ReadCloser creates an io.ReadCloser with all the contents of the buffer.
-func (b *Buffer) RecyclableReader() io.ReadCloser {
+func (b *Buffer) RecyclableReader() RecyclableReader {
 
 	ret := newRecyclableReadCloser(append(b.bufs, b.Buf))
 	b.bufs = nil
@@ -417,6 +426,7 @@ var (
 type Cloner interface {
 	Clone() io.ReadCloser
 }
+
 type recyclable struct {
 	data      [][]byte
 	isRecycle atomic.Int64
@@ -488,7 +498,7 @@ func (r *recyclableReadCloser) Recycle() {
 	recyclableReadCloserPool.Put(r)
 }
 
-func (r *recyclableReadCloser) Clone() io.ReadCloser {
+func (r *recyclableReadCloser) Clone() RecyclableReader {
 	if r == nil {
 		return nil
 	}
@@ -506,11 +516,6 @@ func (r *recyclableReadCloser) Clone() io.ReadCloser {
 func (r *recyclableReadCloser) Close() error {
 	r.isClose.Swap(true)
 	return nil
-}
-
-func (r *recyclableReadCloser) reset() {
-	r.offset = 0
-	r.index = 0
 }
 
 func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
@@ -586,11 +591,7 @@ func (r *recyclableReadCloser) WriteTo(w io.Writer) (n int64, err error) {
 }
 
 func (r *recyclableReadCloser) String() string {
-	var n int
-	for _, buf := range r.bufs.data {
-		n += len(buf)
-	}
-
+	var n = r.Len()
 	if n == 0 {
 		return ""
 	}
@@ -601,4 +602,9 @@ func (r *recyclableReadCloser) String() string {
 	}
 
 	return unsafe.String(unsafe.SliceData(s), len(s))
+}
+
+func (r *recyclableReadCloser) reset() {
+	r.offset = 0
+	r.index = 0
 }
