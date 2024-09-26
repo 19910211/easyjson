@@ -461,6 +461,19 @@ func newRecyclableReadCloser(data [][]byte) *recyclableReadCloser {
 	return d
 }
 
+func (r *recyclableReadCloser) Len() int {
+	bufs := r.bufs
+	if bufs == nil {
+		return 0
+	}
+
+	var n int
+	for _, b := range bufs.data {
+		n += len(b)
+	}
+	return n
+}
+
 func (r *recyclableReadCloser) Recycle() {
 	if r == nil {
 		return
@@ -472,7 +485,6 @@ func (r *recyclableReadCloser) Recycle() {
 
 	r.bufs.Recycle()
 	r.bufs = nil
-
 	recyclableReadCloserPool.Put(r)
 }
 
@@ -506,13 +518,14 @@ func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
 		return 0, closedErr
 	}
 
-	if r.bufs == nil {
+	d := r.bufs
+	if d == nil {
 		return 0, io.EOF
 	}
 
 	var (
-		bufs  = r.bufs.data
-		count = len(r.bufs.data)
+		bufs  = d.data
+		count = len(bufs)
 	)
 	for ; r.index < count; r.index++ {
 		if r.isClose.Load() {
@@ -554,12 +567,13 @@ func (r *recyclableReadCloser) WriteTo(w io.Writer) (n int64, err error) {
 		return 0, closedErr
 	}
 
-	if r.bufs == nil {
+	bufs := r.bufs
+	if bufs == nil {
 		return 0, nil
 	}
 
 	var wLen int
-	for _, buf := range r.bufs.data {
+	for _, buf := range bufs.data {
 		wLen, err = w.Write(buf)
 		n += int64(wLen)
 		if err != nil {
