@@ -402,6 +402,7 @@ type RecyclableReader interface {
 	Clone() RecyclableReader
 	Recycle()
 	Len() int
+	Bytes() []byte
 	String() string
 }
 
@@ -422,10 +423,6 @@ var (
 	recyclableReadCloserPool = sync.Pool{New: func() any { return &recyclableReadCloser{} }}
 	recyclablePool           = sync.Pool{New: func() any { return &recyclable{} }}
 )
-
-type Cloner interface {
-	Clone() io.ReadCloser
-}
 
 type recyclable struct {
 	data      [][]byte
@@ -449,10 +446,10 @@ func (r *recyclable) Recycle() {
 		// Release all buffers.
 		data := r.data
 		r.data = nil
+
 		for _, buf := range data {
 			putBuf(buf)
 		}
-
 		recyclablePool.Put(r)
 	}
 }
@@ -503,13 +500,13 @@ func (r *recyclableReadCloser) Clone() RecyclableReader {
 		return nil
 	}
 
-	d := recyclableReadCloserPool.Get().(*recyclableReadCloser)
-
-	if r.bufs != nil {
-		r.bufs.isRecycle.Add(1)
+	bufs := r.bufs
+	if bufs != nil {
+		bufs.isRecycle.Add(1)
 	}
 
-	*d = recyclableReadCloser{bufs: r.bufs}
+	d := recyclableReadCloserPool.Get().(*recyclableReadCloser)
+	*d = recyclableReadCloser{bufs: bufs}
 	return d
 }
 
@@ -590,18 +587,24 @@ func (r *recyclableReadCloser) WriteTo(w io.Writer) (n int64, err error) {
 	return
 }
 
-func (r *recyclableReadCloser) String() string {
+func (r *recyclableReadCloser) Bytes() []byte {
+	bufs := r.bufs
 	var n = r.Len()
 	if n == 0 {
-		return ""
+		return nil
 	}
 
-	var s = make([]byte, 0, n)
-	for _, buf := range r.bufs.data {
-		s = append(s, buf...)
+	var bf = make([]byte, 0, n)
+	for _, buf := range bufs.data {
+		bf = append(bf, buf...)
 	}
 
-	return unsafe.String(unsafe.SliceData(s), len(s))
+	return bf
+}
+
+func (r *recyclableReadCloser) String() string {
+	sb := r.Bytes()
+	return unsafe.String(unsafe.SliceData(sb), len(sb))
 }
 
 func (r *recyclableReadCloser) reset() {
