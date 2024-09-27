@@ -469,6 +469,10 @@ func newRecyclableReadCloser(data [][]byte) *recyclableReadCloser {
 }
 
 func (r *recyclableReadCloser) Len() int {
+	if r == nil {
+		return 0
+	}
+
 	bufs := r.bufs
 	if bufs == nil {
 		return 0
@@ -511,11 +515,19 @@ func (r *recyclableReadCloser) Clone() RecyclableReader {
 }
 
 func (r *recyclableReadCloser) Close() error {
+	if r == nil {
+		return nil
+	}
+
 	r.isClose.Swap(true)
 	return nil
 }
 
 func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
+	if r == nil {
+		return 0, io.EOF
+	}
+
 	if r.isClose.Load() {
 		return 0, closedErr
 	}
@@ -565,6 +577,10 @@ func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
 }
 
 func (r *recyclableReadCloser) WriteTo(w io.Writer) (n int64, err error) {
+	if r == nil {
+		return 0, nil
+	}
+
 	if r.isClose.Load() {
 		return 0, closedErr
 	}
@@ -586,6 +602,10 @@ func (r *recyclableReadCloser) WriteTo(w io.Writer) (n int64, err error) {
 }
 
 func (r *recyclableReadCloser) Bytes() []byte {
+	if r == nil {
+		return nil
+	}
+
 	bufs := r.bufs
 	var n = r.Len()
 	if n == 0 {
