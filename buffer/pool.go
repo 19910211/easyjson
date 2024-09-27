@@ -582,8 +582,6 @@ func (r *recyclableReadCloser) WriteTo(w io.Writer) (n int64, err error) {
 			return
 		}
 	}
-
-	r.reset()
 	return
 }
 
