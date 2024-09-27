@@ -68,6 +68,14 @@ func (w *Writer) ReadCloser() (io.ReadCloser, error) {
 	return w.Buffer.ReadCloser(), nil
 }
 
+func (w *Writer) RecyclableReader() (buffer.RecyclableReader, error) {
+	if w.Error != nil {
+		return nil, w.Error
+	}
+
+	return w.Buffer.RecyclableReader(), nil
+}
+
 // RawByte appends raw binary data to the buffer.
 func (w *Writer) RawByte(c byte) {
 	w.Buffer.AppendByte(c)
