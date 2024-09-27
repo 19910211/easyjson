@@ -404,6 +404,7 @@ type RecyclableReader interface {
 	Len() int
 	Bytes() []byte
 	String() string
+	ReRead()
 }
 
 // ReadCloser creates an io.ReadCloser with all the contents of the buffer.
@@ -457,7 +458,9 @@ func (r *recyclable) Recycle() {
 type recyclableReadCloser struct {
 	offset    int
 	index     int
+	offsetLen int
 	bufs      *recyclable
+	size      int
 	isClose   atomic.Bool
 	isRecycle atomic.Bool
 }
@@ -473,16 +476,22 @@ func (r *recyclableReadCloser) Len() int {
 		return 0
 	}
 
-	bufs := r.bufs
-	if bufs == nil {
-		return 0
-	}
+	if r.size > 0 {
+		return r.size
+	} else {
+		bufs := r.bufs
+		if bufs == nil {
+			return 0
+		}
 
-	var n int
-	for _, b := range bufs.data {
-		n += len(b)
+		var n int
+		for _, b := range bufs.data {
+			n += len(b)
+		}
+
+		r.size = n
+		return n
 	}
-	return n
 }
 
 func (r *recyclableReadCloser) Recycle() {
@@ -532,6 +541,10 @@ func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
 		return 0, closedErr
 	}
 
+	if r.offsetLen >= r.Len() {
+		return 0, io.EOF
+	}
+
 	d := r.bufs
 	if d == nil {
 		return 0, io.EOF
@@ -540,6 +553,7 @@ func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
 	var (
 		bufs  = d.data
 		count = len(bufs)
+		size  = r.Len()
 	)
 	for ; r.index < count; r.index++ {
 		if r.isClose.Load() {
@@ -559,6 +573,7 @@ func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
 		} else {
 			r.offset += x
 		}
+		r.offsetLen += x
 
 		if n == len(p) {
 			break
@@ -566,11 +581,11 @@ func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
 	}
 
 	// No buffers left or nothing read?
-	if r.index == count {
-		r.reset()
+	if r.offsetLen >= size {
 		if len(p) == 0 {
 			return 0, nil
 		}
+
 		err = io.EOF
 	}
 	return
@@ -578,6 +593,10 @@ func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
 
 func (r *recyclableReadCloser) WriteTo(w io.Writer) (n int64, err error) {
 	if r == nil {
+		return 0, nil
+	}
+
+	if r.offsetLen >= r.Len() {
 		return 0, nil
 	}
 
@@ -625,7 +644,8 @@ func (r *recyclableReadCloser) String() string {
 	return unsafe.String(unsafe.SliceData(sb), len(sb))
 }
 
-func (r *recyclableReadCloser) reset() {
+func (r *recyclableReadCloser) ReRead() {
 	r.offset = 0
 	r.index = 0
+	r.offsetLen = 0
 }
