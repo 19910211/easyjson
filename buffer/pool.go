@@ -611,10 +611,11 @@ func (r *recyclableReadCloser) WriteTo(w io.Writer) (n int64, err error) {
 	}
 
 	var (
-		x    int
-		data = bufs.data
+		data  = bufs.data
+		count = len(data)
+		x     int
 	)
-	for r.index < len(data) {
+	for r.index < count {
 		if r.isClose.Load() {
 			err = closedErr
 			return
