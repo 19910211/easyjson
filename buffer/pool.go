@@ -537,12 +537,12 @@ func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
 		return 0, io.EOF
 	}
 
-	if r.isClose.Load() {
-		return 0, closedErr
-	}
-
 	if r.offsetLen >= r.Len() {
 		return 0, io.EOF
+	}
+
+	if r.isClose.Load() {
+		return 0, closedErr
 	}
 
 	d := r.bufs
@@ -555,7 +555,7 @@ func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
 		count = len(bufs)
 		size  = r.Len()
 	)
-	for ; r.index < count; r.index++ {
+	for r.index < count {
 		if r.isClose.Load() {
 			err = closedErr
 			break
@@ -569,6 +569,7 @@ func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
 		if r.offset+x == len(buf) {
 			// On to the next buffer.
 			r.offset = 0
+			r.index++
 			// We can release this buffer.
 		} else {
 			r.offset += x
@@ -609,10 +610,28 @@ func (r *recyclableReadCloser) WriteTo(w io.Writer) (n int64, err error) {
 		return 0, nil
 	}
 
-	var wLen int
-	for _, buf := range bufs.data {
-		wLen, err = w.Write(buf)
-		n += int64(wLen)
+	var (
+		x    int
+		data = bufs.data
+	)
+	for r.index < len(data) {
+		if r.isClose.Load() {
+			err = closedErr
+			return
+		}
+
+		buf := data[r.index]
+		x, err = w.Write(buf[r.offset:])
+		n += int64(x)
+
+		if r.offset+x == len(buf) {
+			r.offset = 0
+			r.index++
+		} else {
+			r.offset += x
+		}
+		r.offsetLen += x
+
 		if err != nil {
 			return
 		}
