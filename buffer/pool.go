@@ -404,7 +404,7 @@ type RecyclableReader interface {
 	Len() int
 	Bytes() []byte
 	String() string
-	ReRead()
+	Reset()
 }
 
 // ReadCloser creates an io.ReadCloser with all the contents of the buffer.
@@ -456,10 +456,10 @@ func (r *recyclable) Recycle() {
 }
 
 type recyclableReadCloser struct {
+	bufs      *recyclable
 	offset    int
 	index     int
 	offsetLen int
-	bufs      *recyclable
 	size      int
 	isClose   atomic.Bool
 	isRecycle atomic.Bool
@@ -565,12 +565,10 @@ func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
 		x := copy(p[n:], buf[r.offset:])
 		n += x // Increment how much we filled.
 
-		// Did we empty the whole buffer?
 		if r.offset+x == len(buf) {
 			// On to the next buffer.
 			r.offset = 0
 			r.index++
-			// We can release this buffer.
 		} else {
 			r.offset += x
 		}
@@ -581,7 +579,7 @@ func (r *recyclableReadCloser) Read(p []byte) (n int, err error) {
 		}
 	}
 
-	// No buffers left or nothing read?
+	// Did we empty the whole buffer?
 	if r.offsetLen >= size {
 		if len(p) == 0 {
 			return 0, nil
@@ -664,7 +662,7 @@ func (r *recyclableReadCloser) String() string {
 	return unsafe.String(unsafe.SliceData(sb), len(sb))
 }
 
-func (r *recyclableReadCloser) ReRead() {
+func (r *recyclableReadCloser) Reset() {
 	r.offset = 0
 	r.index = 0
 	r.offsetLen = 0
