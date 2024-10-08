@@ -405,6 +405,7 @@ type RecyclableReader interface {
 	Bytes() []byte
 	String() string
 	Reset()
+	BuildBytes(reuse []byte) []byte
 }
 
 // ReadCloser creates an io.ReadCloser with all the contents of the buffer.
@@ -666,4 +667,18 @@ func (r *recyclableReadCloser) Reset() {
 	r.offset = 0
 	r.index = 0
 	r.offsetLen = 0
+}
+
+func (r *recyclableReadCloser) BuildBytes(reuse []byte) []byte {
+	size := r.Len()
+	bufs := r.bufs
+	if size == 0 {
+		return nil
+	}
+
+	for _, buf := range bufs.data {
+		reuse = append(reuse, buf...)
+	}
+
+	return reuse
 }
