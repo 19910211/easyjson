@@ -175,7 +175,13 @@ func (g *Generator) genTypeDecoderNoCheck(t reflect.Type, out string, tags field
 				return err
 			}
 
-			fmt.Fprintln(g.out, ws+"    "+out+" = append("+out+", "+tmpVar+")")
+			if tags.strOmitempty && elem.Kind() == reflect.String {
+				fmt.Fprintln(g.out, ws+"        if "+tmpVar+` != "" {`)
+				fmt.Fprintln(g.out, ws+"            "+out+" = append("+out+", "+tmpVar+")")
+				fmt.Fprintln(g.out, ws+"            }")
+			} else {
+				fmt.Fprintln(g.out, ws+"        "+out+" = append("+out+", "+tmpVar+")")
+			}
 			fmt.Fprintln(g.out, ws+"    in.WantComma()")
 			fmt.Fprintln(g.out, ws+"  }")
 			fmt.Fprintln(g.out, ws+"  in.Delim(']')")

@@ -53,13 +53,14 @@ var primitiveStringEncoders = map[reflect.Kind]string{
 type fieldTags struct {
 	name string
 
-	omit        bool
-	omitEmpty   bool
-	noOmitEmpty bool
-	asString    bool
-	required    bool
-	intern      bool
-	noCopy      bool
+	omit         bool
+	omitEmpty    bool
+	noOmitEmpty  bool
+	asString     bool
+	required     bool
+	intern       bool
+	noCopy       bool
+	strOmitempty bool // 排除掉字符串切片里的空值
 }
 
 // parseFieldTags parses the json field tag into a structure.
@@ -84,6 +85,8 @@ func parseFieldTags(f reflect.StructField) fieldTags {
 			ret.intern = true
 		case s == "nocopy":
 			ret.noCopy = true
+		case s == "strOmitempty":
+			ret.strOmitempty = true
 		}
 	}
 
