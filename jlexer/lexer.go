@@ -625,7 +625,9 @@ func (r *Lexer) unsafeString(skipUnescape bool) (string, []byte) {
 		r.FetchToken()
 	}
 	if !r.Ok() || r.token.kind != TokenString {
-		if r.token.kind != TokenNull {
+		if r.token.kind == TokenNull {
+			r.consume()
+		} else {
 			r.errInvalidToken("string")
 		}
 		return "", nil
@@ -670,7 +672,9 @@ func (r *Lexer) String() string {
 		r.FetchToken()
 	}
 	if !r.Ok() || r.token.kind != TokenString {
-		if r.token.kind != TokenNull {
+		if r.token.kind == TokenNull {
+			r.consume()
+		} else {
 			r.errInvalidToken("string")
 		}
 		return ""
@@ -695,7 +699,9 @@ func (r *Lexer) StringIntern() string {
 		r.FetchToken()
 	}
 	if !r.Ok() || r.token.kind != TokenString {
-		if r.token.kind != TokenNull {
+		if r.token.kind == TokenNull {
+			r.consume()
+		} else {
 			r.errInvalidToken("string")
 		}
 		return ""
@@ -715,7 +721,9 @@ func (r *Lexer) Bytes() []byte {
 		r.FetchToken()
 	}
 	if !r.Ok() || r.token.kind != TokenString {
-		if r.token.kind != TokenNull {
+		if r.token.kind == TokenNull {
+			r.consume()
+		} else {
 			r.errInvalidToken("string")
 		}
 		return nil
@@ -745,25 +753,30 @@ func (r *Lexer) Bool() bool {
 	if !r.Ok() || r.token.kind != TokenBool {
 		switch r.token.kind {
 		case TokenNull:
+			r.consume()
 			return false
 		case TokenNumber:
 			v := bytesToStr(r.token.byteValue)
 			if v == "0" {
+				r.consume()
 				return false
 			} else if v == "1" {
+				r.consume()
 				return true
 			}
 		case TokenString:
 			v := bytesToStr(r.token.byteValue)
 			if v == "false" {
+				r.consume()
 				return false
 			} else if v == "true" {
+				r.consume()
 				return true
 			}
 		default:
 			r.errInvalidToken("bool")
+			return false
 		}
-		return false
 	}
 	ret := r.token.boolValue
 	r.consume()
@@ -775,11 +788,13 @@ func (r *Lexer) number() string {
 		r.FetchToken()
 	}
 	if !r.Ok() || r.token.kind != TokenNumber {
-		if r.token.kind != TokenNull {
+		if r.token.kind == TokenNull {
+			r.consume()
+			return "0"
+		} else {
 			r.errInvalidToken("number")
 			return ""
 		}
-		return "0"
 	}
 	ret := bytesToStr(r.token.byteValue)
 	r.consume()
