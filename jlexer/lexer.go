@@ -625,7 +625,9 @@ func (r *Lexer) unsafeString(skipUnescape bool) (string, []byte) {
 		r.FetchToken()
 	}
 	if !r.Ok() || r.token.kind != TokenString {
-		r.errInvalidToken("string")
+		if r.token.kind != TokenNull {
+			r.errInvalidToken("string")
+		}
 		return "", nil
 	}
 	if !skipUnescape {
@@ -668,7 +670,9 @@ func (r *Lexer) String() string {
 		r.FetchToken()
 	}
 	if !r.Ok() || r.token.kind != TokenString {
-		r.errInvalidToken("string")
+		if r.token.kind != TokenNull {
+			r.errInvalidToken("string")
+		}
 		return ""
 	}
 	if err := r.unescapeStringToken(); err != nil {
@@ -691,7 +695,9 @@ func (r *Lexer) StringIntern() string {
 		r.FetchToken()
 	}
 	if !r.Ok() || r.token.kind != TokenString {
-		r.errInvalidToken("string")
+		if r.token.kind != TokenNull {
+			r.errInvalidToken("string")
+		}
 		return ""
 	}
 	if err := r.unescapeStringToken(); err != nil {
@@ -709,7 +715,9 @@ func (r *Lexer) Bytes() []byte {
 		r.FetchToken()
 	}
 	if !r.Ok() || r.token.kind != TokenString {
-		r.errInvalidToken("string")
+		if r.token.kind != TokenNull {
+			r.errInvalidToken("string")
+		}
 		return nil
 	}
 	if err := r.unescapeStringToken(); err != nil {
@@ -735,7 +743,26 @@ func (r *Lexer) Bool() bool {
 		r.FetchToken()
 	}
 	if !r.Ok() || r.token.kind != TokenBool {
-		r.errInvalidToken("bool")
+		switch r.token.kind {
+		case TokenNull:
+			return false
+		case TokenNumber:
+			v := bytesToStr(r.token.byteValue)
+			if v == "0" {
+				return false
+			} else if v == "1" {
+				return true
+			}
+		case TokenString:
+			v := bytesToStr(r.token.byteValue)
+			if v == "false" {
+				return false
+			} else if v == "true" {
+				return true
+			}
+		default:
+			r.errInvalidToken("bool")
+		}
 		return false
 	}
 	ret := r.token.boolValue
@@ -748,8 +775,11 @@ func (r *Lexer) number() string {
 		r.FetchToken()
 	}
 	if !r.Ok() || r.token.kind != TokenNumber {
-		r.errInvalidToken("number")
-		return ""
+		if r.token.kind != TokenNull {
+			r.errInvalidToken("number")
+			return ""
+		}
+		return "0"
 	}
 	ret := bytesToStr(r.token.byteValue)
 	r.consume()
@@ -1161,7 +1191,8 @@ func (r *Lexer) JsonNumber() json.Number {
 
 	switch r.token.kind {
 	case TokenString:
-		return json.Number(r.String())
+		//return json.Number(r.String())
+		return json.Number(r.UnsafeString())
 	case TokenNumber:
 		return json.Number(r.Raw())
 	case TokenNull:
