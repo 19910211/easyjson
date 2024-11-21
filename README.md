@@ -126,6 +126,8 @@ Besides standard json tag options like 'omitempty' the following are supported:
 * 'intern' - string "interning" (deduplication) to save memory when the very
   same string dictionary values are often met all over the structure.
   See below for more details.
+* 'sliceValOmitempty' 排除掉切片里的【字符串】和【指针】空值
+* 'newStruct' 自定义new Struct
 
 ## Generated Marshaler/Unmarshaler Funcs
 

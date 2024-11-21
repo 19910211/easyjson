@@ -175,10 +175,18 @@ func (g *Generator) genTypeDecoderNoCheck(t reflect.Type, out string, tags field
 				return err
 			}
 
-			if tags.strOmitempty && elem.Kind() == reflect.String {
-				fmt.Fprintln(g.out, ws+"        if "+tmpVar+` != "" {`)
-				fmt.Fprintln(g.out, ws+"            "+out+" = append("+out+", "+tmpVar+")")
-				fmt.Fprintln(g.out, ws+"            }")
+			if tags.sliceValOmitempty {
+				if elem.Kind() == reflect.String {
+					fmt.Fprintln(g.out, ws+"        if "+tmpVar+` != "" {`)
+					fmt.Fprintln(g.out, ws+"            "+out+" = append("+out+", "+tmpVar+")")
+					fmt.Fprintln(g.out, ws+"            }")
+				} else if elem.Kind() == reflect.Ptr {
+					fmt.Fprintln(g.out, ws+"        if "+tmpVar+` != nil {`)
+					fmt.Fprintln(g.out, ws+"            "+out+" = append("+out+", "+tmpVar+")")
+					fmt.Fprintln(g.out, ws+"            }")
+				} else {
+					fmt.Fprintln(g.out, ws+"        "+out+" = append("+out+", "+tmpVar+")")
+				}
 			} else {
 				fmt.Fprintln(g.out, ws+"        "+out+" = append("+out+", "+tmpVar+")")
 			}
@@ -242,7 +250,11 @@ func (g *Generator) genTypeDecoderNoCheck(t reflect.Type, out string, tags field
 		fmt.Fprintln(g.out, ws+"  "+out+" = nil")
 		fmt.Fprintln(g.out, ws+"} else {")
 		fmt.Fprintln(g.out, ws+"  if "+out+" == nil {")
-		fmt.Fprintln(g.out, ws+"    "+out+" = new("+g.getType(t.Elem())+")")
+		if tags.newStruct {
+			fmt.Fprintln(g.out, ws+"    "+out+" = new"+g.getType(t.Elem())+"()")
+		} else {
+			fmt.Fprintln(g.out, ws+"    "+out+" = new("+g.getType(t.Elem())+")")
+		}
 		fmt.Fprintln(g.out, ws+"  }")
 
 		if err := g.genTypeDecoder(t.Elem(), "*"+out, tags, indent+1); err != nil {
