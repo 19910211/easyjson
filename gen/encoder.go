@@ -62,6 +62,7 @@ type fieldTags struct {
 	noCopy            bool
 	sliceValOmitempty bool // 排除掉切片里的 字符串和指针空值
 	newStruct         bool // 自定义new Struct
+	NewStruct         bool // 自定义New Struct
 }
 
 // parseFieldTags parses the json field tag into a structure.
@@ -90,7 +91,10 @@ func parseFieldTags(f reflect.StructField) fieldTags {
 			ret.sliceValOmitempty = true
 		case s == "newStruct":
 			ret.newStruct = true
+		case s == "NewStruct":
+			ret.NewStruct = true
 		}
+
 	}
 
 	return ret
