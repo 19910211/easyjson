@@ -1,7 +1,7 @@
 package easyjson
 
 import (
-	jlexer "github.com/19910211/easyjson/jlexer"
+	"github.com/19910211/easyjson/jlexer"
 	"github.com/19910211/easyjson/jwriter"
 )
 
