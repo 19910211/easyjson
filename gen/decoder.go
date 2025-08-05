@@ -232,9 +232,21 @@ func (g *Generator) genTypeDecoderNoCheck(t reflect.Type, out string, tags field
 					fmt.Fprintln(g.out, ws+"        if "+tmpVar+` != "" {`)
 					fmt.Fprintln(g.out, ws+"            "+out+" = append("+out+", "+tmpVar+")")
 					fmt.Fprintln(g.out, ws+"            }")
-				} else if elem.Kind() == reflect.Ptr {
+				} else if slices.Contains([]reflect.Kind{reflect.Ptr, reflect.Map, reflect.Slice, reflect.Interface}, elem.Kind()) {
 					fmt.Fprintln(g.out, ws+"        if "+tmpVar+` != nil {`)
 					fmt.Fprintln(g.out, ws+"            "+out+" = append("+out+", "+tmpVar+")")
+					fmt.Fprintln(g.out, ws+"            }")
+				} else if elem.Kind() == reflect.Bool {
+					fmt.Fprintln(g.out, ws+"        if "+tmpVar+` == true {`)
+					fmt.Fprintln(g.out, ws+"        "+out+" = append("+out+", "+tmpVar+")")
+					fmt.Fprintln(g.out, ws+"            }")
+				} else if slices.Contains([]reflect.Kind{
+					reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+					reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+					reflect.Float32, reflect.Float64,
+				}, elem.Kind()) {
+					fmt.Fprintln(g.out, ws+"        if "+tmpVar+` != 0 {`)
+					fmt.Fprintln(g.out, ws+"        "+out+" = append("+out+", "+tmpVar+")")
 					fmt.Fprintln(g.out, ws+"            }")
 				} else {
 					fmt.Fprintln(g.out, ws+"        "+out+" = append("+out+", "+tmpVar+")")

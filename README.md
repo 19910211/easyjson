@@ -134,9 +134,7 @@ Besides standard json tag options like 'omitempty' the following are supported:
 * 'intern' - string "interning" (deduplication) to save memory when the very
   same string dictionary values are often met all over the structure.
   See below for more details.
-* 'sliceValOmitempty' 过滤切片里的空值（如:空字符串，空指针，0, false)
-* 'newStruct' 自定义new Struct(废弃弃用)
-* 'NewStruct' 自定义new Struct(废弃弃用)
+* 'sliceValOmitempty' 过滤切片里的空值（如:空字符串，空指针)
 * 'pool' 对象池化 和 `//easyjson:pool` 效果差不多
 * 'noPool' 当前字段 不使用 池化
 
