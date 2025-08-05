@@ -15,8 +15,7 @@ import (
 	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
-
-	"github.com/josharian/intern"
+	"unique"
 )
 
 // TokenKind determines type of a token.
@@ -710,7 +709,8 @@ func (r *Lexer) StringIntern() string {
 		r.errInvalidToken("string")
 		return ""
 	}
-	ret := intern.Bytes(r.token.byteValue)
+
+	ret := unique.Make(string(r.token.byteValue)).Value()
 	r.consume()
 	return ret
 }
