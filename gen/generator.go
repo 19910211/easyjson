@@ -7,6 +7,7 @@ import (
 	"io"
 	"path"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,7 +45,12 @@ type Generator struct {
 	imports map[string]string
 
 	// types that marshalers were requested for by user
-	marshalers map[reflect.Type]bool
+	marshalers       map[reflect.Type]bool
+	marshalerStructs map[string]bool
+
+	pool map[string]reflect.Type
+
+	clones map[string]reflect.Type
 
 	// types that encoders were already generated for
 	typesSeen map[reflect.Type]bool
@@ -66,10 +72,13 @@ func NewGenerator(filename string) *Generator {
 			pkgEasyJSON:     "easyjson",
 			"encoding/json": "json",
 		},
-		fieldNamer:    DefaultFieldNamer{},
-		marshalers:    make(map[reflect.Type]bool),
-		typesSeen:     make(map[reflect.Type]bool),
-		functionNames: make(map[string]reflect.Type),
+		fieldNamer:       DefaultFieldNamer{},
+		marshalers:       make(map[reflect.Type]bool),
+		marshalerStructs: make(map[string]bool),
+		pool:             make(map[string]reflect.Type),
+		clones:           make(map[string]reflect.Type),
+		typesSeen:        make(map[reflect.Type]bool),
+		functionNames:    make(map[string]reflect.Type),
 	}
 
 	// Use a file-unique prefix on all auxiliary funcs to avoid
@@ -155,6 +164,24 @@ func (g *Generator) Add(obj interface{}) {
 	}
 	g.addType(t)
 	g.marshalers[t] = true
+	g.marshalerStructs[g.getType(t)] = true
+}
+
+func (g *Generator) AddPool(obj interface{}) {
+	t := reflect.TypeOf(obj)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	g.pool[g.getType(t)] = t
+}
+
+func (g *Generator) AddClone(obj interface{}) {
+	t := reflect.TypeOf(obj)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	g.clones[g.getType(t)] = t
 }
 
 // printHeader prints package declaration and imports.
@@ -198,7 +225,8 @@ func (g *Generator) printHeader() {
 // Run runs the generator and outputs generated code to out.
 func (g *Generator) Run(out io.Writer) error {
 	g.out = &bytes.Buffer{}
-
+	var poolBuffer = &bytes.Buffer{}
+	var cloneBuffer = &bytes.Buffer{}
 	for len(g.typesUnseen) > 0 {
 		t := g.typesUnseen[len(g.typesUnseen)-1]
 		g.typesUnseen = g.typesUnseen[:len(g.typesUnseen)-1]
@@ -222,8 +250,33 @@ func (g *Generator) Run(out io.Writer) error {
 			return err
 		}
 	}
+
+	for _, t := range g.clones {
+		// 生成clone
+		err := g.genStructClone(cloneBuffer, t)
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, t := range g.pool {
+		// 生成缓存池
+		g.imports["sync"] = "sync"
+		err := g.genStructPool(poolBuffer, t)
+		if err != nil {
+			return err
+		}
+	}
+
 	g.printHeader()
-	_, err := out.Write(g.out.Bytes())
+
+	if _, err := out.Write(g.out.Bytes()); err != nil {
+		return err
+	}
+	if _, err := out.Write(poolBuffer.Bytes()); err != nil {
+		return err
+	}
+	_, err := out.Write(cloneBuffer.Bytes())
 	return err
 }
 
@@ -392,6 +445,161 @@ func (g *Generator) functionName(prefix string, t reflect.Type) string {
 		g.functionNames[nm] = t
 		return nm
 	}
+}
+
+func (g *Generator) genStructSubClone(out *bytes.Buffer, f reflect.Type, pKind reflect.Kind, tep, tmpArr string, layer int) {
+	var varName = fmt.Sprintf("v%d", layer)
+	var valKey = fmt.Sprintf("iv%d", layer)
+	ftyp := g.getType(f.Elem())
+	switch f.Kind() {
+	case reflect.Slice:
+		ii := fmt.Sprintf("i%d", layer)
+		if pKind == reflect.Map {
+			fmt.Fprintln(out, ` if `+tep+` == nil {`)
+			fmt.Fprintln(out, `     `+tmpArr+` = nil `)
+			fmt.Fprintln(out, ` } else { `)
+		} else {
+			fmt.Fprintln(out, ` if `+tep+` != nil {`)
+		}
+		fmt.Fprintln(out, `     `+varName+` := make([]`+ftyp+`, len(`+tep+`))`)
+		fmt.Fprintln(out, ` 	for `+ii+`, `+valKey+` := range `+tep+` {`)
+		if f.Elem().Kind() == reflect.Ptr {
+			if f.Elem().Elem().Kind() == reflect.Struct {
+				if g.ShouldClone(f.Elem().Elem()) {
+					fmt.Fprintln(out, `      `+varName+`[`+ii+`] = `+valKey+`.Clone()`)
+				} else {
+					fmt.Fprintln(out, `      if `+valKey+` != nil {`)
+					fmt.Fprintln(out, `               tmpVal := *`+valKey)
+					fmt.Fprintln(out, `           `+varName+`[`+ii+`] =  &tmpVal`)
+					fmt.Fprintln(out, `      }`)
+				}
+			}
+		} else if f.Elem().Kind() == reflect.Struct && g.ShouldClone(f.Elem()) {
+			fmt.Fprintln(out, `      `+varName+`[`+ii+`] =  *`+valKey+`.Clone()`)
+		} else if slices.Contains([]reflect.Kind{reflect.Map, reflect.Slice, reflect.Array}, f.Elem().Kind()) {
+			g.genStructSubClone(out, f.Elem(), f.Kind(), valKey, varName+`[`+ii+`]`, layer+1)
+		} else {
+			fmt.Fprintln(out, `           `+varName+`[`+ii+`] = `+valKey)
+		}
+		fmt.Fprintln(out, ` 	}`)
+		fmt.Fprintln(out, ` 	`+tmpArr+` = `+varName)
+		fmt.Fprintln(out, ` 	}`)
+	case reflect.Array:
+		ii := fmt.Sprintf("i%d", layer)
+		fmt.Fprintln(out, `    var `+varName+` `+g.getType(f))
+		fmt.Fprintln(out, ` 	for `+ii+`, `+valKey+` := range `+tep+` {`)
+		if f.Elem().Kind() == reflect.Ptr {
+			if f.Elem().Elem().Kind() == reflect.Struct {
+				if g.ShouldClone(f.Elem().Elem()) {
+					fmt.Fprintln(out, `      `+varName+`[`+ii+`] = `+valKey+`.Clone()`)
+				} else {
+					fmt.Fprintln(out, `      if `+valKey+` != nil {`)
+					fmt.Fprintln(out, `               tmpVal := *`+valKey)
+					fmt.Fprintln(out, `           `+varName+`[`+ii+`] = &tmpVal`)
+					fmt.Fprintln(out, `      }`)
+				}
+			}
+		} else if f.Elem().Kind() == reflect.Struct && g.ShouldClone(f.Elem()) {
+			fmt.Fprintln(out, `      `+varName+`[`+ii+`] = *`+valKey+`.Clone()`)
+		} else if slices.Contains([]reflect.Kind{reflect.Map, reflect.Slice, reflect.Array}, f.Elem().Kind()) {
+			g.genStructSubClone(out, f.Elem(), f.Kind(), valKey, varName+`[`+ii+`]`, layer+1)
+		} else {
+			fmt.Fprintln(out, `           `+varName+`[`+ii+`] = `+valKey)
+		}
+		fmt.Fprintln(out, ` 	}`)
+		fmt.Fprintln(out, ` 	`+tmpArr+` = `+varName)
+	case reflect.Map:
+		fkey := g.getType(f.Key())
+		ii := fmt.Sprintf("i%d", layer)
+		if pKind == reflect.Map {
+			fmt.Fprintln(out, ` if `+tep+` == nil {`)
+			fmt.Fprintln(out, `     `+tmpArr+` = nil `)
+			fmt.Fprintln(out, ` } else { `)
+		} else {
+			fmt.Fprintln(out, ` if `+tep+` != nil {`)
+		}
+		fmt.Fprintln(out, `     `+varName+` := make(map[`+fkey+`]`+ftyp+`, len(`+tep+`))`)
+		fmt.Fprintln(out, ` 	for `+ii+`, `+valKey+` := range `+tep+` {`)
+		if f.Elem().Kind() == reflect.Ptr {
+			if f.Elem().Elem().Kind() == reflect.Struct {
+				if g.ShouldClone(f.Elem().Elem()) {
+					fmt.Fprintln(out, `      `+varName+`[`+ii+`] = `+valKey+`.Clone()`)
+				} else {
+					fmt.Fprintln(out, `      if `+valKey+` != nil {`)
+					fmt.Fprintln(out, `               tmpVal := *`+valKey)
+					fmt.Fprintln(out, `           `+varName+`[`+ii+`] = &tmpVal`)
+					fmt.Fprintln(out, `      }else{`)
+					fmt.Fprintln(out, `           `+varName+`[`+ii+`] = nil`)
+					fmt.Fprintln(out, `      }`)
+				}
+			}
+		} else if f.Elem().Kind() == reflect.Struct && g.ShouldClone(f.Elem()) {
+			fmt.Fprintln(out, `      `+varName+`[`+ii+`] = *`+valKey+`.Clone()`)
+		} else if slices.Contains([]reflect.Kind{reflect.Map, reflect.Slice, reflect.Array}, f.Elem().Kind()) {
+			g.genStructSubClone(out, f.Elem(), f.Kind(), valKey, varName+`[`+ii+`]`, layer+1)
+		} else {
+			fmt.Fprintln(out, `           `+varName+`[`+ii+`] = `+valKey)
+		}
+		fmt.Fprintln(out, ` 	}`)
+		fmt.Fprintln(out, ` 	`+tmpArr+` = `+varName)
+		fmt.Fprintln(out, ` 	}`)
+	default:
+		panic(fmt.Sprintf("%s error", f.Kind().String()))
+	}
+}
+
+func (g *Generator) genStructSubPool(out *bytes.Buffer, f reflect.Type, name string, i int, tags fieldTags) bool {
+	ii := fmt.Sprintf("mm%d", i)
+	switch f.Kind() {
+	case reflect.Slice, reflect.Array, reflect.Map:
+		if f.Elem().Kind() == reflect.Ptr {
+			if f.Elem().Elem().Kind() == reflect.Struct {
+				if tags.pool && g.marshalerStructs[g.getType(f.Elem().Elem())] {
+					g.pool[g.getType(f.Elem().Elem())] = f.Elem().Elem()
+				}
+
+				if !tags.noPool {
+					if g.ShouldPool(f.Elem().Elem()) || hasUnknownsReturnToPooler(f.Elem().Elem()) {
+						fmt.Fprintln(out, `      for _, `+ii+` := range `+name+` {`)
+						fmt.Fprintln(out, `         `+ii+`.ReturnToPool()`)
+						fmt.Fprintln(out, `      }`)
+						return true
+					} else if hasUnknownsRecycler(f.Elem().Elem()) {
+						fmt.Fprintln(out, `      for _, mm := range m.`+name+` {`)
+						fmt.Fprintln(out, `         mm.Recycle()`)
+						fmt.Fprintln(out, `      }`)
+						return true
+					}
+				}
+			}
+		} else if f.Elem().Kind() == reflect.Struct {
+			if tags.pool && g.marshalerStructs[g.getType(f.Elem())] {
+				g.pool[g.getType(f.Elem())] = f.Elem()
+			}
+
+			if !tags.noPool {
+				if g.ShouldPool(f.Elem()) || hasUnknownsReturnToPooler(f.Elem()) {
+					fmt.Fprintln(out, `      for _, `+ii+` := range `+name+` {`)
+					fmt.Fprintln(out, `         `+ii+`.ReturnToPool()`)
+					fmt.Fprintln(out, `      }`)
+					return true
+				} else if hasUnknownsRecycler(f.Elem()) {
+					fmt.Fprintln(out, `      for _, mm := range m.`+name+` {`)
+					fmt.Fprintln(out, `         mm.Recycle()`)
+					fmt.Fprintln(out, `      }`)
+					return true
+				}
+			}
+		}
+
+		if slices.Contains([]reflect.Kind{reflect.Map, reflect.Slice, reflect.Array}, f.Elem().Kind()) {
+			fmt.Fprintln(out, `      for _, `+ii+` := range `+name+` {`)
+			b := g.genStructSubPool(out, f.Elem(), ii, i+1, tags)
+			fmt.Fprintln(out, `     }`)
+			return b
+		}
+	}
+	return false
 }
 
 // DefaultFieldsNamer implements trivial naming policy equivalent to encoding/json.

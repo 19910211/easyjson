@@ -1,11 +1,13 @@
 package gen
 
 import (
+	"bytes"
 	"encoding"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -115,6 +117,32 @@ func hasUnknownsUnmarshaler(t reflect.Type) bool {
 func hasUnknownsMarshaler(t reflect.Type) bool {
 	t = reflect.PtrTo(t)
 	return t.Implements(reflect.TypeOf((*easyjson.UnknownsMarshaler)(nil)).Elem())
+}
+
+func hasUnknownsCloner(t reflect.Type) bool {
+	t = reflect.PtrTo(t)
+	method, found := t.MethodByName("Clone")
+	if !found {
+		return false
+	}
+
+	// 方法签名：func (p *T) Clone() T
+	mt := method.Type
+	// 参数数量：1（接收者），返回值数量：1
+	if mt.NumIn() != 1 || mt.NumOut() != 1 {
+		return false
+	}
+	// 返回值类型必须是t
+	return mt.Out(0) == t
+}
+
+func hasUnknownsRecycler(t reflect.Type) bool {
+	t = reflect.PtrTo(t)
+	return t.Implements(reflect.TypeOf((*easyjson.Recycler)(nil)).Elem())
+}
+func hasUnknownsReturnToPooler(t reflect.Type) bool {
+	t = reflect.PtrTo(t)
+	return t.Implements(reflect.TypeOf((*easyjson.ReturnToPooler)(nil)).Elem())
 }
 
 // genTypeDecoderNoCheck generates decoding code for the type t.
@@ -274,10 +302,23 @@ func (g *Generator) genTypeDecoderNoCheck(t reflect.Type, out string, tags field
 		fmt.Fprintln(g.out, ws+"  "+out+" = nil")
 		fmt.Fprintln(g.out, ws+"} else {")
 		fmt.Fprintln(g.out, ws+"  if "+out+" == nil {")
-		if tags.newStruct {
-			fmt.Fprintln(g.out, ws+"    "+out+" = new"+g.getType(t.Elem())+"()")
-		} else if tags.NewStruct {
-			fmt.Fprintln(g.out, ws+"    "+out+" = New"+g.getType(t.Elem())+"()")
+
+		if t.Elem().Kind() == reflect.Struct {
+			if tags.pool && g.marshalerStructs[g.getType(t.Elem())] {
+				g.pool[g.getType(t.Elem())] = t.Elem()
+			}
+
+			if (g.ShouldPool(t.Elem()) || tags.pool) && !tags.noPool {
+				fmt.Fprintln(g.out, ws+"    "+out+" = "+g.getType(t.Elem())+"FromPool()")
+			} else {
+				if tags.newStruct {
+					fmt.Fprintln(g.out, ws+"    "+out+" = new"+g.getType(t.Elem())+"()")
+				} else if tags.NewStruct {
+					fmt.Fprintln(g.out, ws+"    "+out+" = New"+g.getType(t.Elem())+"()")
+				} else {
+					fmt.Fprintln(g.out, ws+"    "+out+" = new("+g.getType(t.Elem())+")")
+				}
+			}
 		} else {
 			fmt.Fprintln(g.out, ws+"    "+out+" = new("+g.getType(t.Elem())+")")
 		}
@@ -542,7 +583,12 @@ func (g *Generator) genStructDecoder(t reflect.Type) error {
 		if !f.Anonymous || f.Type.Kind() != reflect.Ptr {
 			continue
 		}
-		fmt.Fprintln(g.out, "  out."+f.Name+" = new("+g.getType(f.Type.Elem())+")")
+
+		if g.ShouldPool(f.Type) {
+			fmt.Fprintln(g.out, "  out."+f.Name+" = "+g.getType(f.Type.Elem())+"FromPool()")
+		} else {
+			fmt.Fprintln(g.out, "  out."+f.Name+" = new("+g.getType(f.Type.Elem())+")")
+		}
 	}
 
 	fs, err := getStructFields(t)
@@ -620,4 +666,313 @@ func (g *Generator) genStructUnmarshaler(t reflect.Type) error {
 	fmt.Fprintln(g.out, "}")
 
 	return nil
+}
+
+func (g *Generator) genStructPool(out *bytes.Buffer, t reflect.Type) error {
+
+	typ := g.getType(t)
+	fmt.Fprintln(out, "var pool_"+typ+" = sync.Pool{ New: func() any { return &"+typ+"{} }}")
+
+	fmt.Fprintln(out, `func (m *`+typ+`) reset() {`)
+	fmt.Fprintln(out, `  if m != nil {`)
+	var ks, vs []string
+
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		name := f.Name
+		tags := parseFieldTags(f)
+
+		switch f.Type.Kind() {
+		case reflect.Slice, reflect.Map, reflect.Array:
+			if f.Type.Elem().Kind() == reflect.Ptr && f.Type.Elem().Elem().Kind() == reflect.Struct {
+				if tags.pool && g.marshalerStructs[g.getType(f.Type.Elem().Elem())] {
+					g.pool[g.getType(f.Type.Elem().Elem())] = f.Type.Elem().Elem()
+				}
+
+				if !tags.noPool {
+					if g.ShouldPool(f.Type.Elem().Elem()) || hasUnknownsReturnToPooler(f.Type.Elem().Elem()) {
+						fmt.Fprintln(out, `      for _, mm := range m.`+name+`{`)
+						fmt.Fprintln(out, `         mm.ReturnToPool()`)
+						fmt.Fprintln(out, `      }`)
+					} else if hasUnknownsRecycler(f.Type.Elem().Elem()) {
+						fmt.Fprintln(out, `      for _, mm := range m.`+name+` {`)
+						fmt.Fprintln(out, `         mm.Recycle()`)
+						fmt.Fprintln(out, `      }`)
+					}
+				}
+			}
+
+			if f.Type.Kind() == reflect.Slice {
+				fmt.Fprintln(out, `      clear(m.`+name+`)`)
+				if f.Type.Elem().Kind() == reflect.Struct {
+					if tags.pool && g.marshalerStructs[g.getType(f.Type.Elem())] {
+						g.pool[g.getType(f.Type.Elem())] = f.Type.Elem()
+					}
+					if !tags.noPool {
+						if g.ShouldPool(f.Type.Elem()) || hasUnknownsReturnToPooler(f.Type.Elem()) {
+							fmt.Fprintln(out, `      for _, mm := range m.`+name+` {`)
+							fmt.Fprintln(out, `         mm.ReturnToPool()`)
+							fmt.Fprintln(out, `      }`)
+						} else if hasUnknownsRecycler(f.Type.Elem()) {
+							fmt.Fprintln(out, `      for _, mm := range m.`+name+` {`)
+							fmt.Fprintln(out, `         mm.Recycle()`)
+							fmt.Fprintln(out, `      }`)
+						}
+					}
+				} else if slices.Contains([]reflect.Kind{reflect.Slice, reflect.Map, reflect.Array}, f.Type.Elem().Kind()) {
+					out1 := &bytes.Buffer{}
+					fmt.Fprintln(out1, `      for _, mm := range m.`+name+` {`)
+					b := g.genStructSubPool(out1, f.Type.Elem(), "mm", 0, tags)
+					fmt.Fprintln(out1, `      }`)
+					if b {
+						out.Write(out1.Bytes())
+					}
+				}
+
+				var val = fmt.Sprintf("f%d", len(ks))
+				fmt.Fprintln(out, `     `, val, `:= m.`+name+`[:0]`)
+				ks = append(ks, name)
+				vs = append(vs, val)
+			} else if f.Type.Kind() == reflect.Map {
+				if f.Type.Elem().Kind() == reflect.Struct {
+					if tags.pool && g.marshalerStructs[g.getType(f.Type.Elem())] {
+						g.pool[g.getType(f.Type.Elem())] = f.Type.Elem()
+					}
+
+					if !tags.noPool {
+						if g.ShouldPool(f.Type.Elem()) || hasUnknownsReturnToPooler(f.Type.Elem()) {
+							fmt.Fprintln(out, `      for _, mm := range m.`+name+` {`)
+							fmt.Fprintln(out, `         mm.ReturnToPool()`)
+							fmt.Fprintln(out, `      }`)
+						} else if hasUnknownsRecycler(f.Type.Elem()) {
+							fmt.Fprintln(out, `      for _, mm := range m.`+name+` {`)
+							fmt.Fprintln(out, `         mm.Recycle()`)
+							fmt.Fprintln(out, `      }`)
+						}
+					}
+				} else if slices.Contains([]reflect.Kind{reflect.Slice, reflect.Map, reflect.Array}, f.Type.Elem().Kind()) {
+					out1 := &bytes.Buffer{}
+					fmt.Fprintln(out1, `      for _, mm := range m.`+name+` {`)
+					b := g.genStructSubPool(out1, f.Type.Elem(), "mm", 0, tags)
+					fmt.Fprintln(out1, `      }`)
+					if b {
+						out.Write(out1.Bytes())
+					}
+				}
+
+				fmt.Fprintln(out, `      clear(m.`+name+`)`)
+			} else if f.Type.Kind() == reflect.Array {
+				if f.Type.Elem().Kind() == reflect.Struct {
+					if tags.pool && g.marshalerStructs[g.getType(f.Type.Elem())] {
+						g.pool[g.getType(f.Type.Elem())] = f.Type.Elem()
+					}
+
+					if !tags.noPool {
+						if g.ShouldPool(f.Type.Elem()) || hasUnknownsReturnToPooler(f.Type.Elem()) {
+							fmt.Fprintln(out, `      for _, mm := range m.`+name+` {`)
+							fmt.Fprintln(out, `         mm.ReturnToPool()`)
+							fmt.Fprintln(out, `      }`)
+						} else if hasUnknownsRecycler(f.Type.Elem()) {
+							fmt.Fprintln(out, `      for _, mm := range m.`+name+` {`)
+							fmt.Fprintln(out, `         mm.Recycle()`)
+							fmt.Fprintln(out, `      }`)
+						}
+					}
+
+				} else if slices.Contains([]reflect.Kind{reflect.Slice, reflect.Map, reflect.Array}, f.Type.Elem().Kind()) {
+					out1 := &bytes.Buffer{}
+					fmt.Fprintln(out1, `      for _, mm := range m.`+name+` {`)
+					b := g.genStructSubPool(out1, f.Type.Elem(), "mm", 0, tags)
+					fmt.Fprintln(out1, `      }`)
+					if b {
+						out.Write(out1.Bytes())
+					}
+				}
+
+				fmt.Fprintln(out, `      clear(m.`+name+`[:])`)
+			}
+
+		case reflect.Ptr:
+			if f.Type.Elem().Kind() == reflect.Struct {
+				if tags.pool && g.marshalerStructs[g.getType(f.Type.Elem())] {
+					g.pool[g.getType(f.Type.Elem())] = f.Type.Elem().Elem()
+				}
+
+				if !tags.noPool {
+					if g.ShouldPool(f.Type.Elem()) || hasUnknownsReturnToPooler(f.Type.Elem()) {
+						fmt.Fprintln(out, `     m.`+name+`.ReturnToPool()`)
+					} else if hasUnknownsRecycler(f.Type.Elem()) {
+						fmt.Fprintln(out, `     m.`+name+`.Recycle()`)
+					}
+				}
+			}
+		}
+	}
+
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, `     `, `*m = `+typ+`{}`)
+	fmt.Fprintln(out)
+	for i, k := range ks {
+		fmt.Fprintln(out, `     `, `m.`+k+` = `+vs[i])
+	}
+	fmt.Fprintln(out, `  }`)
+	fmt.Fprintln(out, `}`)
+
+	fmt.Fprintln(out, `func (m *`+typ+`) Recycle() { m.ReturnToPool()}`)
+	fmt.Fprintln(out, `func (m *`+typ+`) ReturnToPool() {`)
+	fmt.Fprintln(out, `   if m != nil {`)
+	fmt.Fprintln(out, `         m.reset()`)
+	fmt.Fprintln(out, `         pool_`+typ+`.Put(m)`)
+	fmt.Fprintln(out, `   }`)
+	fmt.Fprintln(out, `}`)
+
+	fmt.Fprintln(out, `func `+typ+`FromPool() *`+typ+`{`)
+	fmt.Fprintln(out, `		return pool_`+typ+`.Get().(*`+typ+`)`)
+	fmt.Fprintln(out, `}`)
+
+	return nil
+}
+
+func (g *Generator) genStructClone(out *bytes.Buffer, t reflect.Type) error {
+	typ := g.getType(t)
+	fmt.Fprintln(out, `func (m *`+typ+`) Clone() *`+typ+` {`)
+	fmt.Fprintln(out, `  if m == nil {`)
+	fmt.Fprintln(out, `      return nil`)
+	fmt.Fprintln(out, `  }`)
+	fmt.Fprintln(out)
+
+	if g.ShouldPool(t) || hasUnknownsReturnToPooler(t) || hasUnknownsRecycler(t) {
+		fmt.Fprintln(out, `   r :=  `+typ+`FromPool()`)
+	} else {
+		fmt.Fprintln(out, `   r :=  &`+typ+`{}`)
+	}
+	fmt.Fprintln(out)
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		name := f.Name
+		switch f.Type.Kind() {
+		case reflect.Slice:
+			ftyp := g.getType(f.Type.Elem())
+			fmt.Fprintln(out, ` if rhs := m.`+name+`; rhs != nil {`)
+			if f.Type.Elem().Kind() == reflect.Ptr {
+				fmt.Fprintln(out, `     tmpContainer := make([]`+ftyp+`, 0, len(rhs))`)
+				fmt.Fprintln(out, ` 	for _, v := range rhs {`)
+				if f.Type.Elem().Elem().Kind() == reflect.Struct && (g.ShouldClone(f.Type.Elem().Elem()) || hasUnknownsCloner(f.Type.Elem().Elem())) {
+					fmt.Fprintln(out, `      tmpContainer = append(tmpContainer, v.Clone())`)
+				} else {
+					fmt.Fprintln(out, `      if v != nil {`)
+					fmt.Fprintln(out, `           tmpVal := *v`)
+					fmt.Fprintln(out, `           tmpContainer = append(tmpContainer, &tmpVal)`)
+					fmt.Fprintln(out, `      }`)
+				}
+				fmt.Fprintln(out, `      }`)
+				fmt.Fprintln(out, `      r.`+name+` = tmpContainer`)
+			} else if f.Type.Elem().Kind() == reflect.Struct && (g.ShouldClone(f.Type.Elem()) || hasUnknownsCloner(f.Type.Elem())) {
+				fmt.Fprintln(out, `     tmpContainer := make([]`+ftyp+`, 0, len(rhs))`)
+				fmt.Fprintln(out, ` 	for _, v := range rhs {`)
+				fmt.Fprintln(out, `       tmpContainer = append(tmpContainer, *v.Clone())`)
+				fmt.Fprintln(out, `      }`)
+				fmt.Fprintln(out, `      r.`+name+` = tmpContainer`)
+			} else if slices.Contains([]reflect.Kind{reflect.Map, reflect.Slice, reflect.Array}, f.Type.Elem().Kind()) {
+				fmt.Fprintln(out, `     tmpContainer := make([]`+ftyp+`, 0, len(rhs))`)
+				fmt.Fprintln(out, ` 	for i, v := range rhs {`)
+				g.genStructSubClone(out, f.Type.Elem(), f.Type.Kind(), "v", "tmpContainer[i]", 0)
+				fmt.Fprintln(out, `      }`)
+				fmt.Fprintln(out, `      r.`+name+` = tmpContainer`)
+			} else {
+				fmt.Fprintln(out, `tmpContainer := make([]`+ftyp+`, len(rhs))`)
+				fmt.Fprintln(out, `copy(tmpContainer, rhs)`)
+				fmt.Fprintln(out, `r.`+name+` = tmpContainer`)
+			}
+			fmt.Fprintln(out, `      }`)
+		case reflect.Map:
+			fkey := g.getType(f.Type.Key())
+			ftyp := g.getType(f.Type.Elem())
+			fmt.Fprintln(out, ` if rhs := m.`+name+`; rhs != nil {`)
+			fmt.Fprintln(out, `     tmpContainer := make(map[`+fkey+`]`+ftyp+`, len(rhs))`)
+			fmt.Fprintln(out, ` 	for k, v := range rhs {`)
+			if f.Type.Elem().Kind() == reflect.Ptr {
+				if f.Type.Elem().Elem().Kind() == reflect.Struct && (g.ShouldClone(f.Type.Elem().Elem()) || hasUnknownsCloner(f.Type.Elem().Elem())) {
+					fmt.Fprintln(out, `      tmpContainer[k] = v.Clone()`)
+				} else {
+					fmt.Fprintln(out, `      if v == nil {`)
+					fmt.Fprintln(out, `           tmpContainer[k] = nil`)
+					fmt.Fprintln(out, `      }else{`)
+					fmt.Fprintln(out, `           tmpVal := *v`)
+					fmt.Fprintln(out, `           tmpContainer[k] = &tmpVal`)
+					fmt.Fprintln(out, `      }`)
+				}
+			} else if f.Type.Elem().Kind() == reflect.Struct && (g.ShouldClone(f.Type.Elem()) || hasUnknownsCloner(f.Type.Elem())) {
+				fmt.Fprintln(out, `      tmpContainer[k] = *v.Clone()`)
+			} else if slices.Contains([]reflect.Kind{reflect.Map, reflect.Slice, reflect.Array}, f.Type.Elem().Kind()) {
+				g.genStructSubClone(out, f.Type.Elem(), f.Type.Kind(), "v", "tmpContainer[k]", 0)
+			} else {
+				fmt.Fprintln(out, `           tmpContainer[k] = v`)
+			}
+			fmt.Fprintln(out, `      }`)
+			fmt.Fprintln(out, `      r.`+name+` = tmpContainer`)
+			fmt.Fprintln(out, `      }`)
+		case reflect.Array:
+			if f.Type.Elem().Kind() == reflect.Ptr {
+				fmt.Fprintln(out, ` 	for i, v := range m.`+name+`{`)
+				if f.Type.Elem().Elem().Kind() == reflect.Struct && (g.ShouldClone(f.Type.Elem().Elem()) || hasUnknownsCloner(f.Type.Elem().Elem())) {
+					fmt.Fprintln(out, `      r.`+name+`[i] = v.Clone()`)
+				} else {
+					fmt.Fprintln(out, `      if v != nil {`)
+					fmt.Fprintln(out, `           tmpVal := *v`)
+					fmt.Fprintln(out, `           r.`+name+`[i] = &tmpVal`)
+					fmt.Fprintln(out, `      }`)
+				}
+				fmt.Fprintln(out, `      }`)
+			} else if f.Type.Elem().Kind() == reflect.Struct && (g.ShouldClone(f.Type.Elem()) || hasUnknownsCloner(f.Type.Elem())) {
+				fmt.Fprintln(out, ` 	for i, v := range m.`+name+`{`)
+				fmt.Fprintln(out, `          r.`+name+`[i] = *v.Clone()`)
+				fmt.Fprintln(out, `      }`)
+			} else if slices.Contains([]reflect.Kind{reflect.Map, reflect.Slice, reflect.Array}, f.Type.Elem().Kind()) {
+				fmt.Fprintln(out, ` 	for i, v := range m.`+name+`{`)
+				g.genStructSubClone(out, f.Type.Elem(), f.Type.Kind(), "v", `r.`+name+`[i]`, 0)
+				fmt.Fprintln(out, `      }`)
+			} else {
+				fmt.Fprintln(out, `          r.`+name+` = m.`+name)
+			}
+		case reflect.Ptr:
+			if f.Type.Elem().Kind() == reflect.Struct {
+				if g.ShouldClone(f.Type.Elem()) || hasUnknownsCloner(f.Type.Elem()) {
+					fmt.Fprintln(out, `          r.`+name+` = m.`+name+`.Clone()`)
+				} else {
+					fmt.Fprintln(out, `      if rhs := m.`+name+`; rhs != nil {`)
+					fmt.Fprintln(out, `          tmpVal := *rhs`)
+					fmt.Fprintln(out, `          r.`+name+` = &tmpVal`)
+					fmt.Fprintln(out, `       })`)
+				}
+			} else {
+				fmt.Fprintln(out, `      if rhs := m.`+name+`; rhs != nil {`)
+				fmt.Fprintln(out, `          tmpVal := *rhs`)
+				fmt.Fprintln(out, `          r.`+name+` = &tmpVal`)
+				fmt.Fprintln(out, `       })`)
+			}
+		case reflect.Struct:
+			if g.ShouldClone(f.Type.Elem()) || hasUnknownsCloner(f.Type.Elem()) {
+				fmt.Fprintln(out, `          r.`+name+` = *m.`+name+`.Clone()`)
+			} else {
+				fmt.Fprintln(out, `          r.`+name+` = m.`+name)
+			}
+		default:
+			fmt.Fprintln(out, `          r.`+name+` = m.`+name)
+		}
+	}
+
+	fmt.Fprintln(out, ` return r`)
+	fmt.Fprintln(out, `}`)
+	return nil
+}
+
+func (g *Generator) ShouldPool(t reflect.Type) bool {
+	_, ok := g.pool[g.getType(t)]
+	return ok
+}
+
+func (g *Generator) ShouldClone(t reflect.Type) bool {
+	_, ok := g.clones[g.getType(t)]
+	return ok
 }

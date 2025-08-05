@@ -9,15 +9,19 @@ import (
 )
 
 const (
-	structComment     = "easyjson:json"
-	structSkipComment = "easyjson:skip"
+	structComment      = "easyjson:json"
+	structSkipComment  = "easyjson:skip"
+	structPoolComment  = "easyjson:pool"
+	structCloneComment = "easyjson:clone"
 )
 
 type Parser struct {
-	PkgPath     string
-	PkgName     string
-	StructNames []string
-	AllStructs  bool
+	PkgPath      string
+	PkgName      string
+	StructNames  []string
+	PoolStructs  map[string]struct{}
+	CloneStructs bool
+	AllStructs   bool
 }
 
 type visitor struct {
@@ -26,7 +30,7 @@ type visitor struct {
 	name string
 }
 
-func (p *Parser) needType(comments *ast.CommentGroup) (skip, explicit bool) {
+func (p *Parser) needType(comments *ast.CommentGroup) (skip, explicit, pool bool) {
 	if comments == nil {
 		return
 	}
@@ -47,12 +51,14 @@ func (p *Parser) needType(comments *ast.CommentGroup) (skip, explicit bool) {
 
 		for _, comment := range strings.Split(comment, "\n") {
 			comment = strings.TrimSpace(comment)
-
+			if strings.HasPrefix(comment, structPoolComment) {
+				pool = true
+			}
 			if strings.HasPrefix(comment, structSkipComment) {
-				return true, false
+				return true, false, pool
 			}
 			if strings.HasPrefix(comment, structComment) {
-				return false, true
+				return false, true, pool
 			}
 		}
 	}
@@ -69,8 +75,7 @@ func (v *visitor) Visit(n ast.Node) (w ast.Visitor) {
 		return v
 
 	case *ast.GenDecl:
-		skip, explicit := v.needType(n.Doc)
-
+		skip, explicit, _ := v.needType(n.Doc)
 		if skip || explicit {
 			for _, nc := range n.Specs {
 				switch nct := nc.(type) {
@@ -82,10 +87,15 @@ func (v *visitor) Visit(n ast.Node) (w ast.Visitor) {
 
 		return v
 	case *ast.TypeSpec:
-		skip, explicit := v.needType(n.Doc)
+		skip, explicit, pool := v.needType(n.Doc)
+		if pool {
+			v.PoolStructs[n.Name.String()] = struct{}{}
+		}
+
 		if skip {
 			return nil
 		}
+
 		if !explicit && !v.AllStructs {
 			return nil
 		}

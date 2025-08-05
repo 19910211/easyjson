@@ -82,6 +82,8 @@ Usage of easyjson:
         return error if some unknown field in json appeared
   -disable_members_unescape
         disable unescaping of \uXXXX string sequences in member names
+  -clone
+        Generate struct clone method
 ```
 
 Using `-all` will generate marshalers/unmarshalers for all Go structs in the
@@ -99,6 +101,20 @@ generated. For example:
 
 ```go
 //easyjson:json
+type A struct {}
+```
+Using 'pool' will generate a buffer pool of structs
+comment starts with `easyjson:pool`
+generated. For example:
+```go
+//easyjson:pool
+type A struct {}
+```
+Using 'clone' Generate the cloning method of the object
+comment starts with `easyjson:clone`
+generated. For example:
+```go
+//easyjson:clone
 type A struct {}
 ```
 
@@ -126,8 +142,11 @@ Besides standard json tag options like 'omitempty' the following are supported:
 * 'intern' - string "interning" (deduplication) to save memory when the very
   same string dictionary values are often met all over the structure.
   See below for more details.
-* 'sliceValOmitempty' 排除掉切片里的【字符串】和【指针】空值
-* 'newStruct' 自定义new Struct
+* 'sliceValOmitempty' 过滤切片里的空值（如:空字符串，空指针，0, false)
+* 'newStruct' 自定义new Struct(废弃弃用)
+* 'NewStruct' 自定义new Struct(废弃弃用)
+* 'pool' 对象池化 和 `//easyjson:pool` 效果差不多
+* 'noPool' 当前字段 不使用 池化
 
 ## Generated Marshaler/Unmarshaler Funcs
 

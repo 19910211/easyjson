@@ -12,6 +12,18 @@ import (
 	"github.com/19910211/easyjson/jwriter"
 )
 
+type Cloner[T any] interface {
+	Clone() T
+}
+
+type Recycler interface {
+	Recycle()
+}
+
+type ReturnToPooler interface {
+	ReturnToPool()
+}
+
 // Marshaler is an easyjson-compatible marshaler interface.
 type Marshaler interface {
 	MarshalEasyJSON(w *jwriter.Writer)

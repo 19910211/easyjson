@@ -1,6 +1,6 @@
 module github.com/19910211/easyjson/benchmark
 
-go 1.23.1
+go 1.24.5
 
 require (
 	github.com/19910211/easyjson v0.0.0
