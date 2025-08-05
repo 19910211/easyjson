@@ -134,9 +134,9 @@ Besides standard json tag options like 'omitempty' the following are supported:
 * 'intern' - string "interning" (deduplication) to save memory when the very
   same string dictionary values are often met all over the structure.
   See below for more details.
-* 'sliceValOmitempty' 过滤切片里的空值（如:空字符串，空指针, false, 0)
-* 'pool' 对象池化 和 `//easyjson:pool` 效果差不多
-* 'noPool' 当前字段 不使用 池化
+* 'sliceValOmitempty' Filter null values in slices (e.g. empty strings, empty pointers, false, 0)
+* 'pool' Object pool has similar effects as '//easyjson:pool'
+* 'noPool' current fields do not use pooling
 
 ## Generated Marshaler/Unmarshaler Funcs
 
