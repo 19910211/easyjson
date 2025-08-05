@@ -110,14 +110,6 @@ generated. For example:
 //easyjson:pool
 type A struct {}
 ```
-Using 'clone' Generate the cloning method of the object
-comment starts with `easyjson:clone`
-generated. For example:
-```go
-//easyjson:clone
-type A struct {}
-```
-
 Additional option notes:
 
 * `-snake_case` tells easyjson to generate snake\_case field names by default
