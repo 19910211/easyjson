@@ -807,7 +807,7 @@ func (g *Generator) genStructPool(out *bytes.Buffer, t reflect.Type) error {
 		case reflect.Ptr:
 			if f.Type.Elem().Kind() == reflect.Struct {
 				if tags.pool && g.marshalerStructs[g.getType(f.Type.Elem())] {
-					g.pool[g.getType(f.Type.Elem())] = f.Type.Elem().Elem()
+					g.pool[g.getType(f.Type.Elem())] = f.Type.Elem()
 				}
 
 				if !tags.noPool {
