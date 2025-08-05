@@ -9,10 +9,9 @@ import (
 )
 
 const (
-	structComment      = "easyjson:json"
-	structSkipComment  = "easyjson:skip"
-	structPoolComment  = "easyjson:pool"
-	structCloneComment = "easyjson:clone"
+	structComment     = "easyjson:json"
+	structSkipComment = "easyjson:skip"
+	structPoolComment = "easyjson:pool"
 )
 
 type Parser struct {
@@ -60,6 +59,10 @@ func (p *Parser) needType(comments *ast.CommentGroup) (skip, explicit, pool bool
 			if strings.HasPrefix(comment, structComment) {
 				return false, true, pool
 			}
+
+			if pool {
+				return false, false, pool
+			}
 		}
 	}
 
@@ -75,8 +78,8 @@ func (v *visitor) Visit(n ast.Node) (w ast.Visitor) {
 		return v
 
 	case *ast.GenDecl:
-		skip, explicit, _ := v.needType(n.Doc)
-		if skip || explicit {
+		skip, explicit, pool := v.needType(n.Doc)
+		if skip || explicit || pool {
 			for _, nc := range n.Specs {
 				switch nct := nc.(type) {
 				case *ast.TypeSpec:

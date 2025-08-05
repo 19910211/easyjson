@@ -964,7 +964,7 @@ func (g *Generator) genStructClone(out *bytes.Buffer, t reflect.Type) error {
 				fmt.Fprintln(out, `       })`)
 			}
 		case reflect.Struct:
-			if g.ShouldClone(f.Type.Elem()) || hasUnknownsCloner(f.Type.Elem()) {
+			if g.ShouldClone(f.Type) || hasUnknownsCloner(f.Type) {
 				fmt.Fprintln(out, `          r.`+name+` = *m.`+name+`.Clone()`)
 			} else {
 				fmt.Fprintln(out, `          r.`+name+` = m.`+name)
