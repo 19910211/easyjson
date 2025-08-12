@@ -153,7 +153,11 @@ func (g *Generator) genTypeDecoderNoCheck(t reflect.Type, out string, tags field
 		fmt.Fprintln(g.out, ws+"if in.IsNull() {")
 		fmt.Fprintln(g.out, ws+"  in.Skip()")
 		fmt.Fprintln(g.out, ws+"} else {")
-		fmt.Fprintln(g.out, ws+"  "+out+" = "+dec)
+		if tags.noCopy {
+			fmt.Fprintln(g.out, ws+"  "+out+" = in.UnsafeJsonNumber()")
+		} else {
+			fmt.Fprintln(g.out, ws+"  "+out+" = "+dec)
+		}
 		fmt.Fprintln(g.out, ws+"}")
 		return nil
 	} else if dec := primitiveStringDecoders[t.Kind()]; dec != "" && tags.asString {

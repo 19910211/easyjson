@@ -1206,10 +1206,32 @@ func (r *Lexer) JsonNumber() json.Number {
 
 	switch r.token.kind {
 	case TokenString:
-		//return json.Number(r.String())
-		return json.Number(r.UnsafeString())
+		return json.Number(r.String())
 	case TokenNumber:
 		return json.Number(r.Raw())
+	case TokenNull:
+		r.Null()
+		return json.Number("")
+	default:
+		r.errSyntax()
+		return json.Number("")
+	}
+}
+
+func (r *Lexer) UnsafeJsonNumber() json.Number {
+	if r.token.kind == TokenUndef && r.Ok() {
+		r.FetchToken()
+	}
+	if !r.Ok() {
+		r.errInvalidToken("json.Number")
+		return json.Number("")
+	}
+
+	switch r.token.kind {
+	case TokenString:
+		return json.Number(r.UnsafeString())
+	case TokenNumber:
+		return json.Number(bytesToStr(r.Raw()))
 	case TokenNull:
 		r.Null()
 		return json.Number("")
