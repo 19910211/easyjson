@@ -710,7 +710,7 @@ func (r *Lexer) StringIntern() string {
 		return ""
 	}
 
-	ret := unique.Make(string(r.token.byteValue)).Value()
+	ret := unique.Make(bytesToStr(r.token.byteValue)).Value()
 	r.consume()
 	return ret
 }
