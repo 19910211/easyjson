@@ -4,7 +4,6 @@ package buffer
 
 import (
 	"io"
-	"math/bits"
 	"net"
 	"sync"
 )
@@ -26,21 +25,9 @@ var config = PoolConfig{
 var buffers = map[int]*sync.Pool{}
 
 func initBuffers() {
-	for l := nextPowerOfTwo(config.PooledSize); l <= config.MaxSize; {
+	for l := config.PooledSize; l <= config.MaxSize; l *= 2 {
 		buffers[l] = new(sync.Pool)
-		if l >= 1024 {
-			l += 1024
-		} else {
-			l *= 2
-		}
 	}
-}
-
-func nextPowerOfTwo(n int) int {
-	if n <= 0 {
-		return 1
-	}
-	return 1 << bits.Len(uint(n-1))
 }
 
 func init() {
@@ -93,6 +80,10 @@ func (b *Buffer) EnsureSpace(s int) {
 	if cap(b.Buf)-len(b.Buf) < s {
 		b.ensureSpaceSlow(s)
 	}
+}
+
+func (b *Buffer) BufsSize() int {
+	return len(b.bufs)
 }
 
 func (b *Buffer) ensureSpaceSlow(s int) {
