@@ -36,6 +36,7 @@ type Generator struct {
 
 	noStdMarshalers          bool
 	omitEmpty                bool
+	omitZero                 bool
 	disallowUnknownFields    bool
 	fieldNamer               FieldNamer
 	simpleBytes              bool
@@ -135,6 +136,11 @@ func (g *Generator) SkipMemberNameUnescaping() {
 // OmitEmpty triggers `json=",omitempty"` behaviour by default.
 func (g *Generator) OmitEmpty() {
 	g.omitEmpty = true
+}
+
+// OmitZero triggers `json=",omitzero"` behaviour by default.
+func (g *Generator) OmitZero() {
+	g.omitZero = true
 }
 
 // SimpleBytes triggers generate output bytes as slice byte

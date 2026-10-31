@@ -339,6 +339,80 @@ var omitEmptyString = "{" +
 	`"SubPNE":{"Value":"3","Value2":"4"}` +
 	"}"
 
+type OmitZero struct {
+	// NOTE: first field is empty to test comma printing.
+
+	StrZ, StrNZ       string  `json:",omitzero"`
+	ZPtr, PtrZ, PtrNZ *string `json:",omitzero"`
+
+	IntNZ int `json:"intField,omitzero"`
+	IntZ  int `json:",omitzero"`
+
+	// NOTE: omitzero DOES have effect on non-pointer struct fields.
+	SubZ, SubNZ          SubStruct  `json:",omitzero"`
+	SubZP, SubPZ, SubPNZ *SubStruct `json:",omitzero"`
+
+	// test IsZero()bool is respected
+	Time time.Time `json:",omitzero"`
+}
+
+var omitZeroValue = OmitZero{
+	StrNZ:  "str",
+	PtrZ:   new(string),
+	PtrNZ:  &str,
+	IntNZ:  6,
+	SubNZ:  SubStruct{Value: "1", Value2: "2"},
+	SubPZ:  &SubStruct{},
+	SubPNZ: &SubStruct{Value: "3", Value2: "4"},
+}
+
+var omitZeroString = "{" +
+	`"StrNZ":"str",` +
+	`"PtrZ":"",` +
+	`"PtrNZ":"bla",` +
+	`"intField":6,` +
+	`"SubNZ":{"Value":"1","Value2":"2"},` +
+	`"SubPZ":{"Value":"","Value2":""},` +
+	`"SubPNZ":{"Value":"3","Value2":"4"}` +
+	"}"
+
+type OmitEmptyAndZero struct {
+	// NOTE: first field is empty to test comma printing.
+
+	StrZ, StrNZ       string  `json:",omitempty,omitzero"`
+	ZPtr, PtrZ, PtrNZ *string `json:",omitempty,omitzero"`
+
+	IntNZ int `json:"intField,omitempty,omitzero"`
+	IntZ  int `json:",omitempty,omitzero"`
+
+	// NOTE: omitzero DOES have effect on non-pointer struct fields.
+	SubZ, SubNZ          SubStruct  `json:",omitempty,omitzero"`
+	SubZP, SubPZ, SubPNZ *SubStruct `json:",omitempty,omitzero"`
+
+	// test IsZero()bool is respected
+	Time time.Time `json:",omitempty,omitzero"`
+}
+
+var omitEmptyAndZeroValue = OmitZero{
+	StrNZ:  "str",
+	PtrZ:   new(string),
+	PtrNZ:  &str,
+	IntNZ:  6,
+	SubNZ:  SubStruct{Value: "1", Value2: "2"},
+	SubPZ:  &SubStruct{},
+	SubPNZ: &SubStruct{Value: "3", Value2: "4"},
+}
+
+var omitEmptyAndZeroString = "{" +
+	`"StrNZ":"str",` +
+	`"PtrZ":"",` +
+	`"PtrNZ":"bla",` +
+	`"intField":6,` +
+	`"SubNZ":{"Value":"1","Value2":"2"},` +
+	`"SubPZ":{"Value":"","Value2":""},` +
+	`"SubPNZ":{"Value":"3","Value2":"4"}` +
+	"}"
+
 type Opts struct {
 	StrNull      opt.String
 	StrEmpty     opt.String
