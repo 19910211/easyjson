@@ -327,13 +327,7 @@ func (g *Generator) genTypeDecoderNoCheck(t reflect.Type, out string, tags field
 			if (g.ShouldPool(t.Elem()) || tags.pool) && !tags.noPool {
 				fmt.Fprintln(g.out, ws+"    "+out+" = "+g.getType(t.Elem())+"FromPool()")
 			} else {
-				if tags.newStruct {
-					fmt.Fprintln(g.out, ws+"    "+out+" = new"+g.getType(t.Elem())+"()")
-				} else if tags.NewStruct {
-					fmt.Fprintln(g.out, ws+"    "+out+" = New"+g.getType(t.Elem())+"()")
-				} else {
-					fmt.Fprintln(g.out, ws+"    "+out+" = new("+g.getType(t.Elem())+")")
-				}
+				fmt.Fprintln(g.out, ws+"    "+out+" = new("+g.getType(t.Elem())+")")
 			}
 		} else {
 			fmt.Fprintln(g.out, ws+"    "+out+" = new("+g.getType(t.Elem())+")")

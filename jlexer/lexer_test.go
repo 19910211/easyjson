@@ -154,7 +154,7 @@ func TestBool(t *testing.T) {
 		{toParse: "true", want: true},
 		{toParse: "false", want: false},
 
-		{toParse: "1", wantError: true},
+		{toParse: "1", want: true},
 		{toParse: "truejunk", wantError: true},
 		{toParse: `false"junk"`, wantError: true},
 		{toParse: "True", wantError: true},

@@ -103,6 +103,12 @@ func (w *Writer) Raw(data []byte, err error) {
 	}
 }
 
+// RawBytesString appends a quoted string from bytes. Kept for code generated
+// before map keys switched to RawText.
+func (w *Writer) RawBytesString(data []byte, err error) {
+	w.RawText(data, err)
+}
+
 // RawText encloses raw binary data in quotes and appends in to the buffer.
 // Useful for calling with results of MarshalText-like functions.
 func (w *Writer) RawText(data []byte, err error) {

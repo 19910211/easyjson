@@ -56,13 +56,13 @@ type fieldTags struct {
 	omit              bool
 	omitEmpty         bool
 	noOmitEmpty       bool
+	omitZero          bool
+	noOmitZero        bool
 	asString          bool
 	required          bool
 	intern            bool
 	noCopy            bool
 	sliceValOmitempty bool // 排除掉切片里的 字符串和指针空值
-	newStruct         bool // 自定义new Struct
-	NewStruct         bool // 自定义New Struct
 	noPool            bool // 不使用缓存池 Struct
 	pool              bool // 使用缓冲池
 }
@@ -95,10 +95,6 @@ func parseFieldTags(f reflect.StructField) fieldTags {
 			ret.noCopy = true
 		case s == "sliceValOmitempty":
 			ret.sliceValOmitempty = true
-		case s == "newStruct":
-			ret.newStruct = true
-		case s == "NewStruct":
-			ret.NewStruct = true
 		case s == "noPool":
 			ret.noPool = true
 		case s == "pool":
@@ -262,7 +258,7 @@ func (g *Generator) genTypeEncoderNoCheck(t reflect.Type, in string, tags fieldT
 
 		// NOTE: extra check for TextMarshaler. It overrides default methods.
 		if reflect.PtrTo(key).Implements(reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem()) {
-			fmt.Fprintln(g.out, ws+"    "+fmt.Sprintf("out.RawText(("+tmpVar+"Name).MarshalText()"+")"))
+			fmt.Fprintln(g.out, ws+"    out.RawText(("+tmpVar+"Name).MarshalText())")
 		} else if keyEnc != "" {
 			fmt.Fprintln(g.out, ws+"    "+fmt.Sprintf(keyEnc, tmpVar+"Name"))
 		} else {

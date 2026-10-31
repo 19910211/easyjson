@@ -21,6 +21,27 @@ const pkgWriter = "github.com/19910211/easyjson/jwriter"
 const pkgLexer = "github.com/19910211/easyjson/jlexer"
 
 var buildFlagsRegexp = regexp.MustCompile("'.+'|\".+\"|\\S+")
+var fromPoolFunc = regexp.MustCompile(`func (\w+)FromPool\(\)`)
+
+func unionNames(declared []string, re *regexp.Regexp, src []byte) []string {
+	seen := make(map[string]struct{}, len(declared))
+	out := make([]string, 0, len(declared))
+	add := func(s string) {
+		if _, ok := seen[s]; ok {
+			return
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	for _, s := range declared {
+		add(s)
+	}
+	for _, m := range re.FindAllSubmatch(src, -1) {
+		add(string(m[1]))
+	}
+	sort.Strings(out)
+	return out
+}
 
 type Generator struct {
 	PkgPath, PkgName         string
@@ -47,7 +68,15 @@ type Generator struct {
 
 // writeStub outputs an initial stub for marshalers/unmarshalers so that the package
 // using marshalers/unmarshales compiles correctly for boostrapping code.
-func (g *Generator) writeStub() error {
+func (g *Generator) writeStub(old []byte) error {
+	poolTypes := unionNames(g.PoolStructs, fromPoolFunc, old)
+	cloneTypes := append([]string(nil), g.CloneStructs...)
+	sort.Strings(cloneTypes)
+	declaredPool := make(map[string]struct{}, len(g.PoolStructs))
+	for _, t := range g.PoolStructs {
+		declaredPool[t] = struct{}{}
+	}
+
 	f, err := os.Create(g.OutName)
 	if err != nil {
 		return err
@@ -83,6 +112,31 @@ func (g *Generator) writeStub() error {
 		fmt.Fprintln(f, "func (*", t, ") UnmarshalEasyJSON(l *jlexer.Lexer) {}")
 		fmt.Fprintln(f)
 		fmt.Fprintln(f, "type EasyJSON_exporter_"+t+" *"+t)
+	}
+
+	known := make(map[string]struct{}, len(g.Types))
+	for _, t := range g.Types {
+		known[t] = struct{}{}
+	}
+	for _, t := range poolTypes {
+		_, declared := declaredPool[t]
+		if declared {
+			if _, ok := known[t]; !ok {
+				fmt.Fprintln(f)
+				fmt.Fprintln(f, "type EasyJSON_exporter_"+t+" *"+t)
+			}
+		}
+		fmt.Fprintln(f)
+		fmt.Fprintln(f, "func "+t+"FromPool() *"+t+" { return new("+t+") }")
+		if declared {
+			fmt.Fprintln(f, "func (m *"+t+") ReturnToPool() {}")
+			fmt.Fprintln(f, "func (m *"+t+") Recycle() {}")
+			fmt.Fprintln(f, "func (m *"+t+") reset() {}")
+		}
+	}
+	for _, t := range cloneTypes {
+		fmt.Fprintln(f)
+		fmt.Fprintln(f, "func (m *"+t+") Clone() *"+t+" { return nil }")
 	}
 
 	return nil
@@ -172,8 +226,25 @@ func (g *Generator) writeMain() (path string, err error) {
 	return dest, os.Rename(src, dest)
 }
 
-func (g *Generator) Run() error {
-	if err := g.writeStub(); err != nil {
+func (g *Generator) Run() (err error) {
+	old, readErr := os.ReadFile(g.OutName)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return readErr
+	}
+	defer func() {
+		if err == nil {
+			return
+		}
+		if os.IsNotExist(readErr) {
+			os.Remove(g.OutName)
+			return
+		}
+		if werr := os.WriteFile(g.OutName, old, 0644); werr != nil {
+			err = fmt.Errorf("%v; restore %s: %v", err, g.OutName, werr)
+		}
+	}()
+
+	if err = g.writeStub(old); err != nil {
 		return err
 	}
 	if g.StubsOnly {
@@ -210,10 +281,11 @@ func (g *Generator) Run() error {
 	cmd.Stdout = f
 	cmd.Stderr = os.Stderr
 	cmd.Dir = filepath.Dir(path)
-	if err = cmd.Run(); err != nil {
+	err = cmd.Run()
+	f.Close()
+	if err != nil {
 		return err
 	}
-	f.Close()
 
 	// move unformatted file to out path
 	if g.NoFormat {
