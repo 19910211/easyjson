@@ -68,6 +68,10 @@ Usage of easyjson:
     	do not run 'gofmt -w' on output file
   -omit_empty
     	omit empty fields by default
+  -omit_zero
+    	omit zero value fields by default
+  -version
+    	print version and exit
   -output_filename string
     	specify the filename of the output
   -pkg
@@ -83,7 +87,7 @@ Usage of easyjson:
   -disable_members_unescape
         disable unescaping of \uXXXX string sequences in member names
   -clone
-        Generate struct clone method
+        generate a Clone method for structs in the file
 ```
 
 Using `-all` will generate marshalers/unmarshalers for all Go structs in the
@@ -103,12 +107,19 @@ generated. For example:
 //easyjson:json
 type A struct {}
 ```
-Using 'pool' will generate a buffer pool of structs
-comment starts with `easyjson:pool`
-generated. For example:
+`//easyjson:pool` generates an object pool for that struct: `AFromPool()`,
+`ReturnToPool()`, `Recycle()`, and `reset()`. A field tag `pool` makes a
+pointer, or a slice, map, or array of that struct, take values from the pool
+and return them when the parent is recycled. `noPool` keeps that field off
+the pool. Calling `AFromPool()` from the same package still compiles while
+easyjson regenerates the file.
+
 ```go
 //easyjson:pool
-type A struct {}
+type A struct {
+    B *B `json:",pool"`
+    C *C `json:",noPool"`
+}
 ```
 Additional option notes:
 
@@ -125,7 +136,9 @@ Additional option notes:
 
 ## Structure json tag options
 
-Besides standard json tag options like 'omitempty' the following are supported:
+Besides standard json tag options like `omitempty` and `omitzero`, the following are supported:
+
+* `omitzero` omits a field whose value is zero, including types that implement `easyjson.IsZero`. `!omitzero` turns that off for one field. `-omit_zero` enables it by default. `!omitempty` turns off default `omitempty` for one field.
 
 * 'nocopy' - disables allocation and copying of string values, making them
   refer to original json buffer memory. This works great for short lived
@@ -134,9 +147,9 @@ Besides standard json tag options like 'omitempty' the following are supported:
 * 'intern' - string "interning" (deduplication) to save memory when the very
   same string dictionary values are often met all over the structure.
   See below for more details.
-* 'sliceValOmitempty' Filter null values in slices (e.g. empty strings, empty pointers, false, 0)
-* 'pool' Object pool has similar effects as '//easyjson:pool'
-* 'noPool' current fields do not use pooling
+* `sliceValOmitempty` drops empty values while decoding a slice: `""`, nil pointers, `false`, and `0`.
+* `pool` uses the object pool for this field, the same as `//easyjson:pool` on the field's struct type.
+* `noPool` does not take this field from the pool and does not call `ReturnToPool` on it. If both tags are set, `noPool` wins for this field. The pooled type is still generated when `pool` is set.
 
 ## Generated Marshaler/Unmarshaler Funcs
 
@@ -169,7 +182,13 @@ These will be used by `easyjson.Marshal` and `easyjson.Unmarshal` when defined
 for a Go type.
 
 Go types can also satisfy the `easyjson.Optional` interface, which allows the
-type to define its own `omitempty` logic.
+type to define its own `omitempty` logic. `easyjson.IsZero` does the same for
+`omitzero`.
+
+JSON `null` decoded into a string, number, or bool becomes the zero value
+(`""`, `0`, or `false`) instead of an error. A bool also accepts `0`, `1`,
+`"true"`, and `"false"`. `+Inf`, `-Inf`, and `NaN` cannot be marshaled; the
+writer returns an error. An empty `MarshalText` result is written as `""`.
 
 ## Type Wrappers
 
